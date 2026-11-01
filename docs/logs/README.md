@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-01 | [`2026-11-01_release_v1.1.0_and_deployment_guide.md`](./2026-11-01_release_v1.1.0_and_deployment_guide.md) | Phát hành bản Release v1.1.0 & Soạn thảo Hướng dẫn triển khai thực tế | `lead-architect`, `qa-security-perf-specialist`, `parent-ui-specialist`, `device-owner-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_implement_branding_and_app_icons.md`](./2026-11-01_implement_branding_and_app_icons.md) | Tích hợp Nhận diện thương hiệu & App Icon Family Shield (VFam) cho 2 ứng dụng | `lead-architect`, `parent-ui-specialist`, `device-owner-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_integrate_firebase_cloud_messaging.md`](./2026-11-01_integrate_firebase_cloud_messaging.md) | Tích hợp Firebase Cloud Messaging (FCM) & Đổi Package Name sang vn.hanoi.khuongnv.vfam | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `backend-sync-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_review_project_org_and_supabase_storage.md`](./2026-11-01_review_project_org_and_supabase_storage.md) | Rà soát cấu trúc tổ chức dự án và đánh giá tối ưu hóa việc lưu trữ thông tin Supabase trong các ứng dụng | `lead-architect`, `device-owner-specialist`, `backend-sync-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
