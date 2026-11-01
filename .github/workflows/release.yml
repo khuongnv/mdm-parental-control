@@ -1,0 +1,51 @@
+name: Release Mobile Apps
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    name: Build & Release Mobile Apps
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      # Build Target Node (Child DO Agent)
+      - name: Build Target Node APK
+        run: |
+          cd target-node
+          chmod +x gradlew
+          ./gradlew app:assembleRelease || ./gradlew app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../mdm-child-agent.apk || true
+
+      # Build Admin Node (Parent App)
+      - name: Build Admin Node APK
+        run: |
+          cd admin-node
+          flutter pub get
+          flutter build apk --debug
+          cp build/app/outputs/flutter-apk/app-debug.apk ../mdm-parent-admin.apk || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mdm-child-agent.apk
+            mdm-parent-admin.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

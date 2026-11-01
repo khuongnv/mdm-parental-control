@@ -60,6 +60,11 @@
                 android:value="mdm_parental_time_tracking" />
         </service>
 
+        <!-- Silent Install Callback Receiver -->
+        <receiver
+            android:name=".updater.SilentInstallReceiver"
+            android:exported="false" />
+
     </application>
 
 </manifest>
