@@ -74,8 +74,8 @@ class AppleTheme {
   static Color hairline(BuildContext context) => context.hairlineDividerColor;
 
   static ThemeData buildDarkTheme() {
-    final fontFam = SystemFontManager.fontFamily;
-    final fontFallback = AppleTypography.fontFamilyFallback;
+    const fontFam = AppleTypography.fontFamily;
+    const fontFallback = AppleTypography.fontFamilyFallback;
 
     return ThemeData(
       brightness: Brightness.dark,
@@ -132,8 +132,8 @@ class AppleTheme {
   }
 
   static ThemeData buildLightTheme() {
-    final fontFam = SystemFontManager.fontFamily;
-    final fontFallback = AppleTypography.fontFamilyFallback;
+    const fontFam = AppleTypography.fontFamily;
+    const fontFallback = AppleTypography.fontFamilyFallback;
 
     return ThemeData(
       brightness: Brightness.light,
@@ -190,20 +190,20 @@ class AppleTheme {
   }
 }
 
-/// Hệ Typography ánh xạ chính xác 100% với Type.kt của dự án Android Music Player
+/// Hệ Typography SF Pro Display đóng gói trực tiếp chuẩn Apple Music UI
 class AppleTypography {
-  static String get fontFamily => SystemFontManager.fontFamily;
-  static List<String> get fontFamilyFallback => [
-        SystemFontManager.fontFamily,
-        'SamsungSans',
-        'sec-roboto-light',
-        'sans-serif',
-        'sans-serif-medium',
-        'Roboto',
-      ];
+  static const String fontFamily = 'SFProDisplay';
+  static const List<String> fontFamilyFallback = [
+    'SFProDisplay',
+    'sans-serif',
+    'sans-serif-medium',
+    'Roboto',
+  ];
 
   // Large Title (displayLarge) cho header: 34sp Bold, letterSpacing 0.37sp, lineHeight 41sp
   static const TextStyle displayLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
     fontSize: 34,
     fontWeight: FontWeight.w700,
     letterSpacing: 0.37,
@@ -212,6 +212,8 @@ class AppleTypography {
 
   // Section headers (headlineLarge): 22sp SemiBold, letterSpacing 0.35sp, lineHeight 28sp
   static const TextStyle headlineLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
     fontSize: 22,
     fontWeight: FontWeight.w600,
     letterSpacing: 0.35,
@@ -220,6 +222,8 @@ class AppleTypography {
 
   // Sub-headers or stats (titleLarge): 20sp SemiBold, letterSpacing 0.38sp, lineHeight 25sp
   static const TextStyle titleLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
     fontSize: 20,
     fontWeight: FontWeight.w600,
     letterSpacing: 0.38,
@@ -228,6 +232,8 @@ class AppleTypography {
 
   // List item primary text (bodyLarge): 17sp, letterSpacing -0.41sp, lineHeight 22sp
   static const TextStyle bodyLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
     fontSize: 17,
     fontWeight: FontWeight.w400,
     letterSpacing: -0.41,
@@ -236,6 +242,8 @@ class AppleTypography {
 
   // List item secondary text (bodyMedium): 15sp, letterSpacing -0.24sp, lineHeight 20sp
   static const TextStyle bodyMedium = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
     fontSize: 15,
     fontWeight: FontWeight.w400,
     letterSpacing: -0.24,
@@ -245,6 +253,8 @@ class AppleTypography {
 
   // Small labels/captions (labelSmall): 12sp Medium, letterSpacing 0sp, lineHeight 16sp
   static const TextStyle labelSmall = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
     fontSize: 12,
     fontWeight: FontWeight.w500,
     letterSpacing: 0,
@@ -1525,7 +1535,7 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   final ParentAppUpdater _updater = ParentAppUpdater();
 
-  String currentVersion = '1.2.3';
+  String currentVersion = '1.2.4';
   bool isCheckingUpdate = false;
   double? downloadProgress;
 

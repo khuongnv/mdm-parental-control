@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../utils/system_font_manager.dart';
 
 /// Floating Dynamic Capsule / Liquid Glass Toast HUD chuẩn Apple Music
 class AppleNotification {
@@ -179,11 +178,9 @@ class _AppleNotificationWidgetState extends State<_AppleNotificationWidget>
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontFamily: SystemFontManager.fontFamily,
-                                  fontFamilyFallback: [
-                                    SystemFontManager.fontFamily,
-                                    'SamsungSans',
-                                    'sec-roboto-light',
+                                  fontFamily: 'SFProDisplay',
+                                  fontFamilyFallback: const [
+                                    'SFProDisplay',
                                     'sans-serif',
                                     'Roboto',
                                   ],
@@ -198,18 +195,16 @@ class _AppleNotificationWidgetState extends State<_AppleNotificationWidget>
                                 widget.message,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontFamily: SystemFontManager.fontFamily,
+                                style: const TextStyle(
+                                  fontFamily: 'SFProDisplay',
                                   fontFamilyFallback: [
-                                    SystemFontManager.fontFamily,
-                                    'SamsungSans',
-                                    'sec-roboto-light',
+                                    'SFProDisplay',
                                     'sans-serif',
                                     'Roboto',
                                   ],
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w400,
-                                  color: const Color(0xFF8E8E93),
+                                  color: Color(0xFF8E8E93),
                                   height: 1.25,
                                 ),
                               ),
