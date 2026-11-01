@@ -6,6 +6,7 @@ import 'services/mdm_supabase_service.dart';
 import 'services/activity_history_service.dart';
 import 'services/github_release_updater.dart';
 import 'widgets/apple_notification.dart';
+import 'widgets/qr_pairing_sheet.dart';
 import 'utils/system_font_manager.dart';
 import 'utils/theme_manager.dart';
 
@@ -470,115 +471,18 @@ class _DashboardTabState extends State<DashboardTab> {
     }
   }
 
-  void _showPairingDialog() {
-    final otpController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.surfaceColor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(22),
-          side: BorderSide(color: context.borderColor, width: 0.75),
-        ),
-        title: Text(
-          'Ghép Nối Thiết Bị Con',
-          style: AppleTypography.titleLarge.copyWith(fontSize: 19, fontWeight: FontWeight.w700),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Nhập mã OTP 6 chữ số đang hiển thị trên ứng dụng VFam Child của con:',
-              style: AppleTypography.bodyMedium.copyWith(fontSize: 14, height: 1.35),
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: otpController,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontFamily: AppleTypography.fontFamily,
-                fontFamilyFallback: AppleTypography.fontFamilyFallback,
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 8,
-                color: context.textPrimaryColor,
-              ),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                hintText: '••••••',
-                hintStyle: const TextStyle(color: AppleTheme.textSecondary, letterSpacing: 8),
-                counterText: '',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Hủy',
-              style: AppleTypography.bodyMedium.copyWith(fontSize: 15, color: AppleTheme.textSecondary),
-            ),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppleTheme.appleRed,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () async {
-              final otp = otpController.text.trim();
-              if (otp.length != 6) {
-                AppleNotification.show(
-                  context,
-                  title: 'Mã OTP Chưa Đủ',
-                  message: 'Vui lòng nhập đủ 6 chữ số OTP từ thiết bị con',
-                  icon: Icons.pin_outlined,
-                  iconColor: AppleTheme.appleAmber,
-                );
-                return;
-              }
-              Navigator.pop(ctx);
-              try {
-                final result = await _supabaseService.claimDevice(otp);
-                final devName = result['device_name'] ?? 'Thiết bị con';
-                await ActivityHistoryService.logActivity(
-                  type: ActivityType.pairing,
-                  title: 'Ghép Nối Thành Công',
-                  subtitle: 'Đã liên kết thiết bị: $devName',
-                );
-                widget.onActionLogged();
-                if (mounted) {
-                  AppleNotification.show(
-                    context,
-                    title: 'Ghép Nối Thành Công',
-                    message: 'Đã liên kết hoàn tất với $devName',
-                    icon: Icons.check_circle_rounded,
-                    iconColor: AppleTheme.appleGreen,
-                  );
-                  _loadDeviceData();
-                }
-              } catch (e) {
-                if (mounted) {
-                  AppleNotification.show(
-                    context,
-                    title: 'Ghép Nối Thất Bại',
-                    message: e.toString().replaceFirst('Exception: ', ''),
-                    icon: Icons.error_outline_rounded,
-                    iconColor: AppleTheme.appleRed,
-                  );
-                }
-              }
-            },
-            child: Text('Xác Nhận', style: AppleTypography.bodyMedium.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
-          ),
-        ],
-      ),
+  Future<void> _showPairingDialog() async {
+    final success = await QrPairingSheet.show(
+      context,
+      supabaseService: _supabaseService,
+      onPaired: (deviceName) {
+        widget.onActionLogged();
+        _loadDeviceData();
+      },
     );
+    if (success == true && mounted) {
+      _loadDeviceData();
+    }
   }
 
   Future<void> _toggleLockdown(bool targetLock) async {
@@ -741,7 +645,7 @@ class _DashboardTabState extends State<DashboardTab> {
               children: [
                 _buildCircleButton(Icons.refresh_rounded, _loadDeviceData),
                 const SizedBox(width: 8),
-                _buildCircleButton(Icons.add_link_rounded, _showPairingDialog, isAccent: true),
+                _buildCircleButton(Icons.qr_code_scanner_rounded, _showPairingDialog, isAccent: true),
               ],
             ),
           ],
