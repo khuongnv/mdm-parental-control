@@ -10,6 +10,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -92,6 +96,44 @@ class MdmSupabaseClient @Inject constructor() {
                     }
                 }
                 onError("Pairing failed: HTTP ${response.code}")
+            }
+        })
+    }
+
+    /**
+     * Cập nhật FCM token của thiết bị con lên bảng devices để nhận silent push
+     */
+    fun updateFcmToken(deviceId: String, fcmToken: String, onComplete: ((Boolean) -> Unit)? = null) {
+        val url = "$supabaseUrl/rest/v1/devices?id=eq.$deviceId"
+        val payload = JSONObject().apply {
+            put("fcm_token", fcmToken)
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            put("updated_at", sdf.format(Date()))
+        }
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+        val requestBody = payload.toString().toRequestBody(mediaType)
+
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Prefer", "return=minimal")
+            .patch(requestBody)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Failed to update FCM token", e)
+                onComplete?.invoke(false)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val success = response.isSuccessful
+                Log.d(TAG, "Update FCM token response code: ${response.code}")
+                onComplete?.invoke(success)
             }
         })
     }

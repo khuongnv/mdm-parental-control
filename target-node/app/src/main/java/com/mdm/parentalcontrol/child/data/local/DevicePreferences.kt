@@ -32,6 +32,10 @@ class DevicePreferences @Inject constructor(
         get() = prefs.getString(KEY_DEVICE_NAME, null)
         set(value) = prefs.edit().putString(KEY_DEVICE_NAME, value).apply()
 
+    var fcmToken: String?
+        get() = prefs.getString(KEY_FCM_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_FCM_TOKEN, value).apply()
+
     fun savePairing(deviceId: String, otpCode: String?, deviceName: String?) {
         prefs.edit()
             .putString(KEY_DEVICE_ID, deviceId)
@@ -50,5 +54,6 @@ class DevicePreferences @Inject constructor(
         private const val KEY_IS_PAIRED = "is_paired"
         private const val KEY_OTP_CODE = "otp_code"
         private const val KEY_DEVICE_NAME = "device_name"
+        private const val KEY_FCM_TOKEN = "fcm_token"
     }
 }

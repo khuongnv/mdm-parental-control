@@ -60,6 +60,15 @@
                 android:value="mdm_parental_time_tracking" />
         </service>
 
+        <!-- Firebase Cloud Messaging Receiver Service -->
+        <service
+            android:name=".service.MdmFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <!-- Silent Install Callback Receiver -->
         <receiver
             android:name=".updater.SilentInstallReceiver"

@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "47968873740",
+    "project_id": "mdm-parental-control",
+    "storage_bucket": "mdm-parental-control.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:47968873740:android:e6290da16f3bf0e31d2d29",
+        "android_client_info": {
+          "package_name": "vn.hanoi.khuongnv.vfam"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAouM1j0Q_hGnx6Y37TJUkg3Qd7kaETuQs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:47968873740:android:ffb3565dbd466c981d2d29",
+        "android_client_info": {
+          "package_name": "vn.hanoi.khuongnv.vfam.child"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAouM1j0Q_hGnx6Y37TJUkg3Qd7kaETuQs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

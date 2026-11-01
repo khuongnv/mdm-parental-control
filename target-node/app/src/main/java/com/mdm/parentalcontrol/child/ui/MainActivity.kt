@@ -4,10 +4,12 @@ import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.google.firebase.messaging.FirebaseMessaging
 import com.mdm.parentalcontrol.child.data.local.DevicePreferences
 import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
@@ -62,6 +64,18 @@ class MainActivity : AppCompatActivity() {
             "⚡ Kết nối Supabase: Chưa tạo mã ghép nối"
         }
 
+        // Lấy FCM Token và đồng bộ lên Supabase
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d("MainActivity", "🔥 Firebase FCM Token: $token")
+                devicePreferences.fcmToken = token
+                if (!savedId.isNullOrEmpty()) {
+                    supabaseClient.updateFcmToken(savedId, token)
+                }
+            }
+        }
+
         val pairingInfoView = TextView(this).apply {
             textSize = 16f
             setPadding(0, 48, 0, 24)
@@ -81,6 +95,11 @@ class MainActivity : AppCompatActivity() {
                     onSuccess = { result ->
                         // Lưu vĩnh viễn vào DevicePreferences để không mất khi restart app/OS
                         devicePreferences.savePairing(result.deviceId, result.otpCode, deviceName)
+
+                        val currentFcmToken = devicePreferences.fcmToken
+                        if (!currentFcmToken.isNullOrEmpty()) {
+                            supabaseClient.updateFcmToken(result.deviceId, currentFcmToken)
+                        }
 
                         runOnUiThread {
                             activeDeviceId = result.deviceId
