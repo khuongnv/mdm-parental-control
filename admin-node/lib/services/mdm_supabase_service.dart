@@ -116,7 +116,7 @@ class MdmSupabaseService {
         .map((list) => List<Map<String, dynamic>>.from(list));
   }
 
-  /// Kích hoạt Khóa Khẩn Cấp tức thì (< 100ms) qua Broadcast và cập nhật DB
+  /// Kích hoạt Khóa Khẩn Cấp tức thì qua Broadcast và cập nhật DB
   Future<void> triggerPanicLockdown(String deviceId, bool isLocked) async {
     // 1. Cập nhật trạng thái trực tiếp vào bảng devices
     await client.from('devices').update({
@@ -124,18 +124,21 @@ class MdmSupabaseService {
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', deviceId);
 
-    // 2. Phát thông điệp Broadcast qua Realtime Channel để máy con phản ứng tức thì
+    // 2. Phát thông điệp Broadcast qua Realtime Channel
     try {
       final channel = client.channel('device:$deviceId');
-      channel.subscribe();
-      await channel.sendBroadcastMessage(
-        event: 'PANIC_LOCKDOWN',
-        payload: {
-          'device_id': deviceId,
-          'is_locked': isLocked,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        },
-      );
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'PANIC_LOCKDOWN',
+            payload: {
+              'device_id': deviceId,
+              'is_locked': isLocked,
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
     } catch (e) {
       debugPrint('⚠️ Error sending realtime broadcast: $e');
     }
@@ -143,24 +146,40 @@ class MdmSupabaseService {
 
   /// Cấp thêm thời gian sử dụng nhanh (+15m, +30m, +60m)
   Future<void> grantExtraTime(String deviceId, int extraMinutes) async {
-    // 1. Cập nhật số phút thưởng vào bảng devices
+    // 1. Lấy số phút thưởng hiện tại để cộng dồn
+    int currentExtra = 0;
+    try {
+      final dev = await client.from('devices').select('extra_time_minutes').eq('id', deviceId).maybeSingle();
+      if (dev != null && dev['extra_time_minutes'] != null) {
+        currentExtra = (dev['extra_time_minutes'] as num).toInt();
+      }
+    } catch (_) {}
+
+    final newExtra = currentExtra + extraMinutes;
+
+    // 2. Cập nhật số phút thưởng vào bảng devices
     await client.from('devices').update({
-      'extra_time_minutes': extraMinutes,
+      'extra_time_minutes': newExtra,
+      'is_locked': false, // Thưởng giờ tự động mở khóa nếu đang bị khóa
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', deviceId);
 
-    // 2. Phát thông điệp Broadcast
+    // 3. Phát thông điệp Broadcast
     try {
       final channel = client.channel('device:$deviceId');
-      channel.subscribe();
-      await channel.sendBroadcastMessage(
-        event: 'GRANT_EXTRA_TIME',
-        payload: {
-          'device_id': deviceId,
-          'extra_minutes': extraMinutes,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        },
-      );
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'GRANT_EXTRA_TIME',
+            payload: {
+              'device_id': deviceId,
+              'extra_minutes': extraMinutes,
+              'total_extra_minutes': newExtra,
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
     } catch (e) {
       debugPrint('⚠️ Error sending extra time broadcast: $e');
     }
@@ -182,17 +201,5 @@ class MdmSupabaseService {
 
     channel.subscribe();
     return channel;
-  }
-
-  /// Lấy báo cáo sử dụng ngày hôm nay
-  Future<Map<String, dynamic>?> getTodayUsageSummary(String deviceId) async {
-    final today = DateTime.now().toIso8601String().split('T').first;
-    final data = await client
-        .from('daily_usage_summaries')
-        .select('*')
-        .eq('device_id', deviceId)
-        .eq('summary_date', today)
-        .maybeSingle();
-    return data;
   }
 }

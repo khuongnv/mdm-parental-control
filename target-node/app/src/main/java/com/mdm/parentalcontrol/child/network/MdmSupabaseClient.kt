@@ -160,7 +160,7 @@ class MdmSupabaseClient @Inject constructor() {
                 Log.i(TAG, "Connected to Supabase Realtime WebSocket")
                 isConnected = true
 
-                // 1. Join Topic realtime:device:{deviceId}
+                // 1. Join Topic realtime:device:{deviceId} kèm broadcast, presence và postgres_changes
                 val joinMsg = JSONObject().apply {
                     put("topic", topic)
                     put("event", "phx_join")
@@ -173,6 +173,15 @@ class MdmSupabaseClient @Inject constructor() {
                             put("presence", JSONObject().apply {
                                 put("key", deviceId)
                             })
+                            val pgChanges = JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("event", "UPDATE")
+                                    put("schema", "public")
+                                    put("table", "devices")
+                                    put("filter", "id=eq.$deviceId")
+                                })
+                            }
+                            put("postgres_changes", pgChanges)
                         })
                     })
                     put("ref", "1")
@@ -219,6 +228,19 @@ class MdmSupabaseClient @Inject constructor() {
                                 val minutes = innerPayload?.optInt("extra_minutes", 15) ?: 15
                                 Log.i(TAG, "⏳ Supabase Realtime received GRANT_EXTRA_TIME: +$minutes minutes")
                                 onExtraTime(minutes)
+                            }
+                        }
+                    } else if (event == "postgres_changes") {
+                        val payload = msg.optJSONObject("payload")
+                        val data = payload?.optJSONObject("data")
+                        val record = data?.optJSONObject("record")
+                        if (record != null) {
+                            val isLocked = record.optBoolean("is_locked", false)
+                            val extraMins = record.optInt("extra_time_minutes", 0)
+                            Log.w(TAG, "⚡ Supabase Postgres Changes: is_locked=$isLocked, extra_time=$extraMins")
+                            onPanicLockdown(isLocked)
+                            if (extraMins > 0) {
+                                onExtraTime(extraMins)
                             }
                         }
                     }

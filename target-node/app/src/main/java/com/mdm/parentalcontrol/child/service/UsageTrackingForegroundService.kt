@@ -13,6 +13,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
+import android.widget.Toast
+import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -96,21 +99,80 @@ class UsageTrackingForegroundService : LifecycleService() {
                 deviceId = deviceId,
                 onPanicLockdown = { isLocked ->
                     Log.w(TAG, "🚨 Foreground Service handling PANIC_LOCKDOWN: $isLocked")
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@UsageTrackingForegroundService,
+                            if (isLocked) "🚨 Thiết bị đã bị ba mẹ khóa khẩn cấp!" else "✅ Thiết bị đã được ba mẹ mở khóa!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                     lifecycleScope.launch(Dispatchers.IO) {
                         val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
                         usageDao.savePolicy(currentPolicy.copy(isEmergencyLockdown = isLocked))
-                        evaluatePoliciesAndEnforce()
+                        enforceLockdown(isLocked)
                     }
                 },
                 onExtraTime = { minutes ->
                     Log.i(TAG, "⏳ Foreground Service handling GRANT_EXTRA_TIME: +$minutes minutes")
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@UsageTrackingForegroundService,
+                            "🎁 Ba mẹ đã thưởng thêm $minutes phút sử dụng!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                     lifecycleScope.launch(Dispatchers.IO) {
                         val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
-                        usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = currentPolicy.dailyLimitMinutes + minutes))
-                        evaluatePoliciesAndEnforce()
+                        usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = currentPolicy.dailyLimitMinutes + minutes, isEmergencyLockdown = false))
+                        enforceLockdown(false)
                     }
                 }
             )
+        }
+    }
+
+    private fun enforceLockdown(isLocked: Boolean) {
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
+        val admin = ComponentName(this, MdmDeviceAdminReceiver::class.java)
+
+        if (isLocked) {
+            // 1. Nếu là Device Admin: Khóa màn hình ngay lập tức
+            if (dpm.isAdminActive(admin)) {
+                try {
+                    dpm.lockNow()
+                    Log.i(TAG, "Device Admin: dpm.lockNow() executed successfully")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to lockNow", e)
+                }
+            }
+
+            // 2. Nếu là Device Owner: Làm xám icon và khóa khởi chạy các ứng dụng
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isDeviceOwnerApp(packageName)) {
+                val whitelist = setOf(packageName, "com.android.dialer", "com.google.android.dialer", "com.samsung.android.dialer", "com.android.emergency")
+                val toSuspend = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                    .filter { (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 && !whitelist.contains(it.packageName) }
+                    .map { it.packageName }
+                    .toTypedArray()
+                try {
+                    dpm.setPackagesSuspended(admin, toSuspend, true)
+                    Log.i(TAG, "Device Owner: Suspended ${toSuspend.size} packages")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to setPackagesSuspended", e)
+                }
+            }
+        } else {
+            // Mở khóa: gỡ bỏ suspended apps
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isDeviceOwnerApp(packageName)) {
+                val toUnsuspend = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                    .map { it.packageName }
+                    .toTypedArray()
+                try {
+                    dpm.setPackagesSuspended(admin, toUnsuspend, false)
+                    Log.i(TAG, "Device Owner: Unsuspended packages")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to unsuspend packages", e)
+                }
+            }
         }
     }
 

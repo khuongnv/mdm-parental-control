@@ -1,7 +1,9 @@
 package com.mdm.parentalcontrol.child.ui
 
 import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
+import android.widget.Toast
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -127,11 +129,23 @@ class MainActivity : AppCompatActivity() {
                                 onPanicLockdown = { isLocked ->
                                     runOnUiThread {
                                         pairingInfoView.append("\n\n🚨 NHẬN LỆNH KHÓA: $isLocked")
+                                        if (isLocked) {
+                                            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as? android.app.admin.DevicePolicyManager
+                                            val admin = ComponentName(this@MainActivity, com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver::class.java)
+                                            if (dpm != null && dpm.isAdminActive(admin)) {
+                                                try {
+                                                    dpm.lockNow()
+                                                } catch (e: Exception) {
+                                                    android.util.Log.e("MainActivity", "lockNow failed", e)
+                                                }
+                                            }
+                                        }
                                     }
                                 },
                                 onExtraTime = { mins ->
                                     runOnUiThread {
                                         pairingInfoView.append("\n\n⏳ NHẬN THƯỞNG GIỜ: +$mins phút")
+                                        Toast.makeText(this@MainActivity, "🎁 Ba mẹ đã thưởng thêm $mins phút sử dụng!", Toast.LENGTH_LONG).show()
                                     }
                                 }
                             )
