@@ -328,10 +328,11 @@ RETURNS TABLE (
     device_name TEXT,
     message TEXT
 ) AS $$
+#variable_conflict use_column
 DECLARE
     target_device_id UUID;
     target_device_name TEXT;
-    session_id UUID;
+    target_session_id UUID;
 BEGIN
     -- Kiểm tra quyền phụ huynh trong family
     IF NOT public.is_member_of_family(p_family_id) THEN
@@ -341,7 +342,7 @@ BEGIN
 
     -- Tìm phiên pairing hợp lệ
     SELECT s.id, s.device_id, d.device_name
-    INTO session_id, target_device_id, target_device_name
+    INTO target_session_id, target_device_id, target_device_name
     FROM public.pairing_sessions s
     JOIN public.devices d ON d.id = s.device_id
     WHERE s.otp_code = p_otp_code
@@ -356,19 +357,22 @@ BEGIN
     END IF;
 
     -- Đánh dấu session đã claim
-    UPDATE public.pairing_sessions SET is_claimed = true WHERE id = session_id;
+    UPDATE public.pairing_sessions 
+    SET is_claimed = true 
+    WHERE pairing_sessions.id = target_session_id;
 
     -- Gán device vào family và kích hoạt
     UPDATE public.devices
     SET family_id = p_family_id,
         status = 'active',
         updated_at = now()
-    WHERE id = target_device_id;
+    WHERE devices.id = target_device_id;
 
     -- Khởi tạo policy mặc định nếu chưa có
-    INSERT INTO public.policies (device_id, daily_screen_time_limit_mins, bedtime_start, bedtime_end, is_bedtime_enabled)
-    VALUES (target_device_id, 120, '21:00:00', '06:00:00', true)
-    ON CONFLICT (device_id) DO NOTHING;
+    IF NOT EXISTS (SELECT 1 FROM public.policies p WHERE p.device_id = target_device_id) THEN
+        INSERT INTO public.policies (device_id, daily_screen_time_limit_mins, bedtime_start, bedtime_end, is_bedtime_enabled)
+        VALUES (target_device_id, 120, '21:00:00', '06:00:00', true);
+    END IF;
 
     RETURN QUERY SELECT true, target_device_id, target_device_name, 'Ghép nối thiết bị thành công'::TEXT;
 END;
