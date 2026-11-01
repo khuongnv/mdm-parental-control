@@ -1,6 +1,0 @@
-@Mdm.Backend.Api_HostAddress = http://localhost:5010
-
-GET {{Mdm.Backend.Api_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

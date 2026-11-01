@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-01 | [`2026-11-01_cleanup_legacy_netcore_backend.md`](./2026-11-01_cleanup_legacy_netcore_backend.md) | Dọn dẹp và tinh gọn project, loại bỏ toàn bộ mã nguồn .NET Core cũ và hoàn thiện cấu trúc Supabase BaaS | `lead-architect` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_implement_supabase_backend_replacement.md`](./2026-11-01_implement_supabase_backend_replacement.md) | Triển khai thay thế toàn bộ Backend bằng Supabase Realtime và BaaS cho admin-node và target-node | `lead-architect` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_setup_supabase_schema.md`](./2026-11-01_setup_supabase_schema.md) | Khởi tạo Database Schema, RLS Policies & Cấu hình Supabase | `lead-architect` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_epic_supabase_backend_replacement.md`](./2026-11-01_epic_supabase_backend_replacement.md) | Lập đặc tả Epic chuyển đổi Backend sang Supabase BaaS & Realtime Pipeline | `lead-architect` | ✅ Hoàn thành |

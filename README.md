@@ -74,13 +74,14 @@ flowchart TD
   - Bộ đệm Room Database cục bộ: Tự tính toán trừ quota và tự suspend ứng dụng khi hết giờ ngay cả khi ngắt kết nối mạng nhiều ngày.
   - Tự động reset và mở khóa lúc 00:00:00 hàng ngày.
 
-- ⏱️ **Kênh Điều Khiển Khẩn Cấp Thời Gian Thực (< 3 Giây)**:
-  - Tích hợp **ASP.NET Core SignalR** kết hợp **Redis Backplane**: Lệnh Khóa khẩn cấp (Panic Lockdown) và Cấp thêm giờ (+15m, +30m) được truyền tới máy con tức thì.
+- ⏱️ **Kênh Điều Khiển Khẩn Cấp Thời Gian Thực (< 100ms)**:
+  - Tích hợp **Supabase Realtime Broadcast** & **Phoenix Channels WebSockets**: Lệnh Khóa khẩn cấp (Panic Lockdown) và Cấp thêm giờ (+15m, +30m) được truyền tới máy con tức thì với độ trễ dưới 100ms.
+  - Tự động theo dõi trạng thái sống/chết (Online/Offline) của thiết bị con thông qua **Supabase Presence**.
   - Kênh dự phòng **FCM High-Priority Push** tự động đánh thức Agent khi socket bị gián đoạn.
 
-- 📷 **Ghép Nối 1 Bước Bằng QR Code**:
-  - Máy con sinh mã QR động kèm OTP 6 số (TTL 5 phút).
-  - Phụ huynh quét bằng camera là hoàn tất ghép nối ngay lập tức.
+- 📷 **Ghép Nối 1 Bước Bằng QR / OTP**:
+  - Máy con sinh mã QR động kèm OTP 6 số (TTL 5 phút) qua Stored Procedure Supabase.
+  - Phụ huynh quét bằng camera hoặc nhập mã 6 số là hoàn tất ghép nối ngay lập tức.
 
 ---
 
@@ -95,15 +96,18 @@ mdm-parental-control/
 │   │   └── parent-app-ui-rules.md           # Quy tắc UI/UX Parent App
 │   └── skills/                   # Kỹ năng Swarm
 │       ├── mdm-swarm/            # Cẩm nang vận hành 5 Epics
-│       └── swarm-dispatch/       # Quy trình giao việc & init_log.ps1
+│       ├── swarm-dispatch/       # Quy trình giao việc & init_log.ps1
+│       └── deploy-app/           # Tự động hóa build, tag và release độc lập
 │
 ├── target-node/                  # [Child Agent] Ứng dụng Android Device Owner
 │   └── README.md                 # Tài liệu chi tiết thành phần Target Node
 │
-├── backend/                      # [Central Server] ASP.NET Core 8 Web API & SignalR
-│   └── README.md                 # Tài liệu chi tiết thành phần Backend
+├── backend/                      # [Central Server] Supabase BaaS, PostgreSQL 15+ & Realtime
+│   ├── supabase/
+│   │   └── migrations/           # File di trú SQL, RLS Policies, Stored Procedures
+│   └── README.md                 # Tài liệu chi tiết thành phần Backend Supabase
 │
-├── admin-node/                   # [Parent App] Ứng dụng Quản trị Phụ huynh
+├── admin-node/                   # [Parent App] Ứng dụng Quản trị Phụ huynh (Flutter)
 │   └── README.md                 # Tài liệu chi tiết thành phần Admin Node
 │
 ├── docs/                         # Tài liệu hệ thống
@@ -111,7 +115,8 @@ mdm-parental-control/
 │   │   ├── 00_Tong_Quan_Kien_Truc_He_Thong.md
 │   │   ├── target_node_epics.md  # 5 Epics chi tiết cho Target Node
 │   │   ├── backend_epics.md      # 5 Epics chi tiết cho Backend
-│   │   └── admin_node_epics.md   # 5 Epics chi tiết cho Admin Node
+│   │   ├── admin_node_epics.md   # 5 Epics chi tiết cho Admin Node
+│   │   └── EPIC_04_Supabase_Backend_Replacement.md
 │   └── logs/                     # Nhật ký truy vết Swarm (Audit Logs)
 │       ├── README.md             # Bảng chỉ mục lịch sử thực thi
 │       └── *.md                  # Từng phiên thực thi chi tiết
@@ -129,7 +134,7 @@ Dự án được xây dựng và bảo trì bởi hệ sinh thái **Multi-Agent
 1. **`lead-architect`**: Kiến trúc sư trưởng, quy hoạch Clean Architecture, hợp đồng giao tiếp giữa các tầng và quản lý nhật ký truy vết.
 2. **`device-owner-specialist`**: Chuyên gia Android Device Owner, Anti-tampering, `setPackagesSuspended`, `setApplicationHidden` và phân quyền hệ điều hành.
 3. **`usage-tracking-specialist`**: Chuyên gia UsageStats Engine, Room Database, Local Rule Engine và tối ưu hóa pin.
-4. **`backend-sync-specialist`**: Chuyên gia ASP.NET Core Web API, SignalR Hubs, Ingestion Pipeline và Redis Pub/Sub.
+4. **`backend-sync-specialist`**: Chuyên gia Supabase BaaS, PostgreSQL RLS, Realtime Broadcast & Presence, Ingestion Pipeline và Edge Functions.
 5. **`parent-ui-specialist`**: Chuyên gia giao diện người dùng Parent App, biểu đồ thời gian thực và trải nghiệm phản hồi tức thì.
 6. **`qa-security-perf-specialist`**: Chuyên gia kiểm thử bảo mật chống bypass, kiểm tra Safe Mode, test rò rỉ RAM và benchmark pin (< 3-5%/ngày).
 
@@ -141,9 +146,9 @@ Dự án được xây dựng và bảo trì bởi hệ sinh thái **Multi-Agent
 
 | Thành Phần | Công Nghệ Chính | Thành Phần Chi Tiết & Thư Viện |
 | :--- | :--- | :--- |
-| **`target-node`** | **Kotlin Native Android** | Android SDK (Min 26, Target 34/35), Coroutines & Flow, AndroidX Room DB, WorkManager, Hilt DI, SignalR Java Client, Firebase Cloud Messaging. |
-| **`backend`** | **ASP.NET Core (.NET 8 LTS)** | Kestrel Web API, SignalR Hubs, `System.Threading.Channels`, EF Core 8 (PostgreSQL), Dapper, Redis (`StackExchange.Redis`), Hangfire, `FirebaseAdmin` SDK. |
-| **`admin-node`** | **Mobile App (Flutter / Compose)** | Real-time Charts (`fl_chart` / Canvas), Camera QR Scanner (`mobile_scanner` / CameraX), SignalR Client, Material 3 Design System. |
+| **`target-node`** | **Kotlin Native Android** | Android SDK (Min 26, Target 34/35), Coroutines & Flow, AndroidX Room DB, WorkManager, Hilt DI, OkHttp Phoenix WebSocket Supabase Client, Firebase Cloud Messaging. |
+| **`backend`** | **Supabase BaaS (PostgreSQL 15+)** | Supabase Realtime Broadcast & Presence (< 100ms), PostgREST RPCs, Row Level Security (RLS), Edge Functions, Storage. |
+| **`admin-node`** | **Flutter (Android & iOS)** | `supabase_flutter` SDK, Realtime Streams, Realtime Charts (`fl_chart`), Camera QR Scanner (`mobile_scanner`), Material 3 Design System. |
 
 ---
 

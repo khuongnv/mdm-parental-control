@@ -19,16 +19,11 @@ Hệ thống máy chủ điều phối trung tâm của giải pháp **MDM Paren
 ## 📂 2. Cấu Trúc Thư Mục Backend
 ```
 backend/
-├── supabase/
-│   ├── .env                      # Credentials & Service Role Key (Git-ignored)
-│   └── migrations/
-│       └── 20261101_initial_schema.sql  # Toàn bộ Schema, Indexes, RLS Policies, RPCs & Realtime Publication
-│
-└── [Legacy] .NET Core 8 Solution # Kiến trúc Web API cũ (Lưu trữ tham khảo)
-    ├── MdmParentalControl.sln
-    ├── Mdm.Backend.Api/
-    ├── Mdm.Backend.Core/
-    └── Mdm.Backend.Infrastructure/
+├── README.md                     # Tài liệu hướng dẫn Backend Supabase
+└── supabase/
+    ├── .env                      # Credentials & Service Role Key (Git-ignored)
+    └── migrations/
+        └── 20261101_initial_schema.sql  # Toàn bộ Schema, Indexes, RLS Policies, RPCs & Realtime Publication
 ```
 
 ---
