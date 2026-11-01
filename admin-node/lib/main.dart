@@ -6,9 +6,15 @@ import 'services/mdm_supabase_service.dart';
 import 'services/activity_history_service.dart';
 import 'services/github_release_updater.dart';
 import 'widgets/apple_notification.dart';
+import 'utils/system_font_manager.dart';
+import 'utils/theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Nạp font chữ hệ thống Android gốc (Samsung One UI, Pixel, v.v.)
+  await SystemFontManager.init();
+  // Nạp cấu hình theme (Hệ thống / Sáng / Tối AMOLED)
+  await themeManager.init();
   try {
     await MdmSupabaseService.initialize();
   } catch (e) {
@@ -17,19 +23,20 @@ void main() async {
   runApp(const MdmParentApp());
 }
 
+/// Tiện ích hỗ trợ lấy màu sắc ngữ cảnh theo Theme (Sáng / Tối)
+extension ThemeHelper on BuildContext {
+  bool get isDark => Theme.of(this).brightness == Brightness.dark;
+  Color get surfaceColor => isDark ? AppleTheme.glassSurface : AppleTheme.lightSurface;
+  Color get surfaceVariantColor => isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant;
+  Color get backgroundColor => isDark ? AppleTheme.darkBackground : AppleTheme.lightBackground;
+  Color get textPrimaryColor => isDark ? AppleTheme.textPrimaryDark : AppleTheme.textPrimaryLight;
+  Color get textSecondaryColor => AppleTheme.textSecondary;
+  Color get borderColor => isDark ? AppleTheme.glassBorder : AppleTheme.lightBorder;
+  Color get hairlineDividerColor => isDark ? AppleTheme.hairlineDivider : AppleTheme.lightHairlineDivider;
+}
+
 /// Hệ màu và kiểu dáng chuẩn Apple Music UI/UX Design System
 class AppleTheme {
-  // Nền đen sâu chuẩn AMOLED
-  static const Color darkBackground = Color(0xFF000000);
-  // Nền Liquid Glass Card bán trong suốt cao cấp
-  static const Color glassSurface = Color(0xEE1E1E22);
-  // Nền surface phụ / item hover
-  static const Color darkSurfaceElevated = Color(0xFF2C2C2E);
-  // Đường viền sáng bạc Liquid Glass (Luminous silver rim)
-  static const Color glassBorder = Color(0x33FFFFFF);
-  // Đường kẻ viền siêu mảnh (Hairline Divider)
-  static const Color hairlineDivider = Color(0xFF38383A);
-
   // Bảng màu Accent Apple Music
   static const Color appleRed = Color(0xFFFA2D55); // Apple Music Red
   static const Color appleBlue = Color(0xFF007AFF); // iOS System Blue
@@ -37,64 +44,198 @@ class AppleTheme {
   static const Color appleAmber = Color(0xFFFF9500); // iOS System Orange
   static const Color applePurple = Color(0xFFAF52DE); // iOS System Purple
 
+  // Nền đen sâu chuẩn AMOLED (Dark Theme)
+  static const Color darkBackground = Color(0xFF000000);
+  static const Color darkSurface = Color(0xFF1C1C1E); // iOS secondarySystemBackground
+  static const Color darkSurfaceVariant = Color(0xFF2C2C2E); // iOS tertiarySystemBackground
+  static const Color darkSurfaceElevated = Color(0xFF2C2C2E);
+  static const Color glassSurface = Color(0xEE1E1E22);
+  static const Color glassBorder = Color(0x33FFFFFF);
+  static const Color hairlineDivider = Color(0xFF38383A);
+
+  // Nền sáng chuẩn iOS (Light Theme)
+  static const Color lightBackground = Color(0xFFFFFFFF);
+  static const Color lightSurface = Color(0xFFF2F2F7); // iOS .systemGray6
+  static const Color lightSurfaceVariant = Color(0xFFE5E5EA); // iOS .systemGray5
+  static const Color lightBorder = Color(0xFFE5E5EA);
+  static const Color lightHairlineDivider = Color(0xFFE5E5EA);
+
   // Màu văn bản phân cấp
-  static const Color textPrimary = Color(0xFFFFFFFF);
+  static const Color textPrimaryDark = Color(0xFFFFFFFF);
+  static const Color textPrimaryLight = Color(0xFF000000);
   static const Color textSecondary = Color(0xFF8E8E93); // Gray93
+  static const Color textPrimary = Color(0xFFFFFFFF); // Giữ tương thích ngược
+
+  static Color surface(BuildContext context) => context.surfaceColor;
+  static Color surfaceVariant(BuildContext context) => context.surfaceVariantColor;
+  static Color border(BuildContext context) => context.borderColor;
+  static Color textPrimaryOf(BuildContext context) => context.textPrimaryColor;
+  static Color background(BuildContext context) => context.backgroundColor;
+  static Color hairline(BuildContext context) => context.hairlineDividerColor;
+
+  static ThemeData buildDarkTheme() {
+    final fontFam = SystemFontManager.fontFamily;
+    final fontFallback = AppleTypography.fontFamilyFallback;
+
+    return ThemeData(
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: darkBackground,
+      fontFamily: fontFam,
+      fontFamilyFallback: fontFallback,
+      typography: Typography.material2021(platform: TargetPlatform.android),
+      textTheme: const TextTheme(
+        displayLarge: AppleTypography.displayLarge,
+        headlineLarge: AppleTypography.headlineLarge,
+        titleLarge: AppleTypography.titleLarge,
+        bodyLarge: AppleTypography.bodyLarge,
+        bodyMedium: AppleTypography.bodyMedium,
+        labelSmall: AppleTypography.labelSmall,
+      ).apply(
+        bodyColor: textPrimaryDark,
+        displayColor: textPrimaryDark,
+        fontFamily: fontFam,
+        fontFamilyFallback: fontFallback,
+      ),
+      colorScheme: const ColorScheme.dark(
+        primary: appleRed,
+        secondary: appleBlue,
+        surface: glassSurface,
+        surfaceContainerHighest: darkSurfaceVariant,
+        onSurface: textPrimaryDark,
+        onSurfaceVariant: textSecondary,
+      ),
+      cardTheme: CardThemeData(
+        color: glassSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: glassBorder, width: 0.75),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: glassSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: glassBorder, width: 0.75),
+        ),
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: darkBackground,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        titleTextStyle: AppleTypography.titleLarge.copyWith(color: textPrimaryDark),
+      ),
+      useMaterial3: true,
+    );
+  }
+
+  static ThemeData buildLightTheme() {
+    final fontFam = SystemFontManager.fontFamily;
+    final fontFallback = AppleTypography.fontFamilyFallback;
+
+    return ThemeData(
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: lightBackground,
+      fontFamily: fontFam,
+      fontFamilyFallback: fontFallback,
+      typography: Typography.material2021(platform: TargetPlatform.android),
+      textTheme: const TextTheme(
+        displayLarge: AppleTypography.displayLarge,
+        headlineLarge: AppleTypography.headlineLarge,
+        titleLarge: AppleTypography.titleLarge,
+        bodyLarge: AppleTypography.bodyLarge,
+        bodyMedium: AppleTypography.bodyMedium,
+        labelSmall: AppleTypography.labelSmall,
+      ).apply(
+        bodyColor: textPrimaryLight,
+        displayColor: textPrimaryLight,
+        fontFamily: fontFam,
+        fontFamilyFallback: fontFallback,
+      ),
+      colorScheme: const ColorScheme.light(
+        primary: appleRed,
+        secondary: appleBlue,
+        surface: lightSurface,
+        surfaceContainerHighest: lightSurfaceVariant,
+        onSurface: textPrimaryLight,
+        onSurfaceVariant: textSecondary,
+      ),
+      cardTheme: CardThemeData(
+        color: lightSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: lightBorder, width: 0.75),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: lightSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: lightBorder, width: 0.75),
+        ),
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: lightBackground,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+        titleTextStyle: AppleTypography.titleLarge.copyWith(color: textPrimaryLight),
+      ),
+      useMaterial3: true,
+    );
+  }
 }
 
 /// Hệ Typography ánh xạ chính xác 100% với Type.kt của dự án Android Music Player
 class AppleTypography {
-  static const String fontFamily = 'sans-serif';
-  static const List<String> fontFamilyFallback = ['sans-serif', 'sans-serif-medium', 'Roboto'];
+  static String get fontFamily => SystemFontManager.fontFamily;
+  static List<String> get fontFamilyFallback => [
+        SystemFontManager.fontFamily,
+        'SamsungSans',
+        'sec-roboto-light',
+        'sans-serif',
+        'sans-serif-medium',
+        'Roboto',
+      ];
 
   // Large Title (displayLarge) cho header: 34sp Bold, letterSpacing 0.37sp, lineHeight 41sp
   static const TextStyle displayLarge = TextStyle(
-    fontFamily: fontFamily,
-    fontFamilyFallback: fontFamilyFallback,
     fontSize: 34,
     fontWeight: FontWeight.w700,
     letterSpacing: 0.37,
     height: 41 / 34,
-    color: AppleTheme.textPrimary,
   );
 
   // Section headers (headlineLarge): 22sp SemiBold, letterSpacing 0.35sp, lineHeight 28sp
   static const TextStyle headlineLarge = TextStyle(
-    fontFamily: fontFamily,
-    fontFamilyFallback: fontFamilyFallback,
     fontSize: 22,
     fontWeight: FontWeight.w600,
     letterSpacing: 0.35,
     height: 28 / 22,
-    color: AppleTheme.textPrimary,
   );
 
   // Sub-headers or stats (titleLarge): 20sp SemiBold, letterSpacing 0.38sp, lineHeight 25sp
   static const TextStyle titleLarge = TextStyle(
-    fontFamily: fontFamily,
-    fontFamilyFallback: fontFamilyFallback,
     fontSize: 20,
     fontWeight: FontWeight.w600,
     letterSpacing: 0.38,
     height: 25 / 20,
-    color: AppleTheme.textPrimary,
   );
 
   // List item primary text (bodyLarge): 17sp, letterSpacing -0.41sp, lineHeight 22sp
   static const TextStyle bodyLarge = TextStyle(
-    fontFamily: fontFamily,
-    fontFamilyFallback: fontFamilyFallback,
     fontSize: 17,
     fontWeight: FontWeight.w400,
     letterSpacing: -0.41,
     height: 22 / 17,
-    color: AppleTheme.textPrimary,
   );
 
   // List item secondary text (bodyMedium): 15sp, letterSpacing -0.24sp, lineHeight 20sp
   static const TextStyle bodyMedium = TextStyle(
-    fontFamily: fontFamily,
-    fontFamilyFallback: fontFamilyFallback,
     fontSize: 15,
     fontWeight: FontWeight.w400,
     letterSpacing: -0.24,
@@ -104,8 +245,6 @@ class AppleTypography {
 
   // Small labels/captions (labelSmall): 12sp Medium, letterSpacing 0sp, lineHeight 16sp
   static const TextStyle labelSmall = TextStyle(
-    fontFamily: fontFamily,
-    fontFamilyFallback: fontFamilyFallback,
     fontSize: 12,
     fontWeight: FontWeight.w500,
     letterSpacing: 0,
@@ -119,46 +258,18 @@ class MdmParentApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'VFam Admin',
-      debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.dark,
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: AppleTheme.darkBackground,
-        fontFamily: AppleTypography.fontFamily,
-        fontFamilyFallback: AppleTypography.fontFamilyFallback,
-        typography: Typography.material2021(platform: TargetPlatform.android),
-        textTheme: const TextTheme(
-          displayLarge: AppleTypography.displayLarge,
-          headlineLarge: AppleTypography.headlineLarge,
-          titleLarge: AppleTypography.titleLarge,
-          bodyLarge: AppleTypography.bodyLarge,
-          bodyMedium: AppleTypography.bodyMedium,
-          labelSmall: AppleTypography.labelSmall,
-        ),
-        colorScheme: const ColorScheme.dark(
-          primary: AppleTheme.appleRed,
-          secondary: AppleTheme.appleBlue,
-          surface: AppleTheme.glassSurface,
-        ),
-        cardTheme: CardThemeData(
-          color: AppleTheme.glassSurface,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-            side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
-          ),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: AppleTheme.darkBackground,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          titleTextStyle: AppleTypography.titleLarge,
-        ),
-        useMaterial3: true,
-      ),
-      home: const MainNavigationScreen(),
+    return ListenableBuilder(
+      listenable: themeManager,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'VFam Admin',
+          debugShowCheckedModeBanner: false,
+          themeMode: themeManager.themeMode,
+          theme: AppleTheme.buildLightTheme(),
+          darkTheme: AppleTheme.buildDarkTheme(),
+          home: const MainNavigationScreen(),
+        );
+      },
     );
   }
 }
@@ -179,7 +290,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppleTheme.darkBackground,
+      backgroundColor: context.backgroundColor,
       // Cho phép nội dung cuộn bên dưới thanh điều hướng nổi
       extendBody: true,
       body: IndexedStack(
@@ -199,6 +310,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   /// Thanh điều hướng nổi Liquid Glass chuẩn Apple Music
   Widget _buildFloatingBottomNavBar() {
+    final isDark = context.isDark;
     return SafeArea(
       top: false,
       bottom: true,
@@ -206,12 +318,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: AppleTheme.glassSurface,
+          color: isDark ? AppleTheme.glassSurface : AppleTheme.lightSurface.withValues(alpha: 0.94),
           borderRadius: BorderRadius.circular(26),
-          border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+          border: Border.all(color: context.borderColor, width: 0.75),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.45),
+              color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.08),
               blurRadius: 18,
               offset: const Offset(0, 6),
             ),
@@ -353,10 +465,10 @@ class _DashboardTabState extends State<DashboardTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppleTheme.glassSurface,
+        backgroundColor: context.surfaceColor,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(22),
-          side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
+          side: BorderSide(color: context.borderColor, width: 0.75),
         ),
         title: Text(
           'Ghép Nối Thiết Bị Con',
@@ -382,11 +494,11 @@ class _DashboardTabState extends State<DashboardTab> {
                 fontSize: 28,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 8,
-                color: AppleTheme.textPrimary,
+                color: context.textPrimaryColor,
               ),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: AppleTheme.darkSurfaceElevated,
+                fillColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
                 hintText: '••••••',
                 hintStyle: const TextStyle(color: AppleTheme.textSecondary, letterSpacing: 8),
@@ -548,14 +660,14 @@ class _DashboardTabState extends State<DashboardTab> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppleTheme.darkBackground,
+      backgroundColor: context.backgroundColor,
       body: SafeArea(
         bottom: false,
         child: isLoading
             ? const Center(child: CircularProgressIndicator(color: AppleTheme.appleRed))
             : RefreshIndicator(
                 color: AppleTheme.appleRed,
-                backgroundColor: AppleTheme.glassSurface,
+                backgroundColor: context.surfaceColor,
                 onRefresh: _loadDeviceData,
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -689,12 +801,12 @@ class _DashboardTabState extends State<DashboardTab> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
         decoration: BoxDecoration(
-          color: AppleTheme.glassSurface,
+          color: context.surfaceColor,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+          border: Border.all(color: context.borderColor, width: 0.75),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
+              color: Colors.black.withValues(alpha: context.isDark ? 0.25 : 0.05),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -713,7 +825,7 @@ class _DashboardTabState extends State<DashboardTab> {
                 fontSize: 16.5,
                 fontWeight: FontWeight.w700,
                 letterSpacing: -0.2,
-                color: AppleTheme.textPrimary,
+                color: context.textPrimaryColor,
               ),
             ),
             Text(
@@ -753,10 +865,10 @@ class _DashboardTabState extends State<DashboardTab> {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.15) : AppleTheme.darkSurfaceElevated,
+          color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.15) : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant),
           shape: BoxShape.circle,
           border: Border.all(
-            color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.3) : AppleTheme.glassBorder,
+            color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.3) : context.borderColor,
             width: 0.5,
           ),
         ),
@@ -801,9 +913,9 @@ class _DashboardTabState extends State<DashboardTab> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppleTheme.glassSurface,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+        border: Border.all(color: context.borderColor, width: 0.75),
       ),
       child: Row(
         children: [
@@ -813,7 +925,7 @@ class _DashboardTabState extends State<DashboardTab> {
             decoration: BoxDecoration(
               color: isEmergencyLocked
                   ? AppleTheme.appleRed.withValues(alpha: 0.15)
-                  : (isOnline ? AppleTheme.appleGreen.withValues(alpha: 0.15) : AppleTheme.darkSurfaceElevated),
+                  : (isOnline ? AppleTheme.appleGreen.withValues(alpha: 0.15) : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
@@ -883,9 +995,9 @@ class _DashboardTabState extends State<DashboardTab> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppleTheme.glassSurface,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+        border: Border.all(color: context.borderColor, width: 0.75),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -926,7 +1038,7 @@ class _DashboardTabState extends State<DashboardTab> {
             child: LinearProgressIndicator(
               value: isEmergencyLocked ? 1.0 : 0.35,
               minHeight: 7,
-              backgroundColor: AppleTheme.darkSurfaceElevated,
+              backgroundColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
               valueColor: AlwaysStoppedAnimation<Color>(
                 isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.appleAmber,
               ),
@@ -951,9 +1063,9 @@ class _DashboardTabState extends State<DashboardTab> {
   Widget _buildControlGroupCard() {
     return Container(
       decoration: BoxDecoration(
-        color: AppleTheme.glassSurface,
+        color: context.surfaceColor,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+        border: Border.all(color: context.borderColor, width: 0.75),
       ),
       child: Column(
         children: [
@@ -989,7 +1101,7 @@ class _DashboardTabState extends State<DashboardTab> {
             ),
           ),
 
-          const Divider(color: AppleTheme.hairlineDivider, height: 1, indent: 62),
+          Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
 
           // Mục 2: Thưởng thêm giờ nhanh
           Padding(
@@ -1054,9 +1166,9 @@ class _DashboardTabState extends State<DashboardTab> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: AppleTheme.darkSurfaceElevated,
+          color: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppleTheme.glassBorder, width: 0.5),
+          border: Border.all(color: context.borderColor, width: 0.5),
         ),
         alignment: Alignment.center,
         child: Text(
@@ -1064,6 +1176,7 @@ class _DashboardTabState extends State<DashboardTab> {
           style: AppleTypography.bodyLarge.copyWith(
             fontSize: 13,
             fontWeight: FontWeight.w600,
+            color: context.textPrimaryColor,
           ),
         ),
       ),
@@ -1120,7 +1233,7 @@ class _HistoryTabState extends State<HistoryTab> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppleTheme.darkBackground,
+      backgroundColor: context.backgroundColor,
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -1149,13 +1262,13 @@ class _HistoryTabState extends State<HistoryTab> {
                               showDialog(
                                 context: context,
                                 builder: (ctx) => AlertDialog(
-                                  backgroundColor: AppleTheme.glassSurface,
+                                  backgroundColor: context.surfaceColor,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(22),
-                                    side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
+                                    side: BorderSide(color: context.borderColor, width: 0.75),
                                   ),
-                                  title: Text('Xóa lịch sử?', style: AppleTypography.titleLarge),
-                                  content: Text('Toàn bộ nhật ký gửi lệnh sẽ được làm sạch.', style: AppleTypography.bodyMedium),
+                                  title: const Text('Xóa lịch sử?', style: AppleTypography.titleLarge),
+                                  content: const Text('Toàn bộ nhật ký gửi lệnh sẽ được làm sạch.', style: AppleTypography.bodyMedium),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(ctx),
@@ -1197,9 +1310,9 @@ class _HistoryTabState extends State<HistoryTab> {
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppleTheme.glassSurface,
+                  color: context.surfaceColor,
                   borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+                  border: Border.all(color: context.borderColor, width: 0.75),
                 ),
                 child: Row(
                   children: [
@@ -1268,21 +1381,21 @@ class _HistoryTabState extends State<HistoryTab> {
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator(color: AppleTheme.appleRed))
                   : _activities.isEmpty
-                      ? Center(
+                      ? const Center(
                           child: Text('Chưa có lịch sử hoạt động', style: AppleTypography.bodyMedium),
                         )
                       : Container(
                           margin: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: AppleTheme.glassSurface,
+                            color: context.surfaceColor,
                             borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+                            border: Border.all(color: context.borderColor, width: 0.75),
                           ),
                           child: ListView.separated(
                             padding: const EdgeInsets.only(bottom: 90),
                             itemCount: _activities.length,
-                            separatorBuilder: (context, index) => const Divider(
-                              color: AppleTheme.hairlineDivider,
+                            separatorBuilder: (context, index) => Divider(
+                              color: context.hairlineDividerColor,
                               height: 1,
                               indent: 62,
                             ),
@@ -1412,7 +1525,7 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   final ParentAppUpdater _updater = ParentAppUpdater();
 
-  String currentVersion = '1.2.2';
+  String currentVersion = '1.2.3';
   bool isCheckingUpdate = false;
   double? downloadProgress;
 
@@ -1438,12 +1551,12 @@ class _SettingsTabState extends State<SettingsTab> {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: AppleTheme.glassSurface,
+          backgroundColor: context.surfaceColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(22),
-            side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
+            side: BorderSide(color: context.borderColor, width: 0.75),
           ),
-          title: Text('Ứng Dụng Đã Mới Nhất', style: AppleTypography.titleLarge),
+          title: const Text('Ứng Dụng Đã Mới Nhất', style: AppleTypography.titleLarge),
           content: Text('VFam Admin đang ở phiên bản mới nhất ($currentVersion). Không có bản cập nhật nào.', style: AppleTypography.bodyMedium),
           actions: [
             TextButton(
@@ -1465,10 +1578,10 @@ class _SettingsTabState extends State<SettingsTab> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            backgroundColor: AppleTheme.glassSurface,
+            backgroundColor: context.surfaceColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(22),
-              side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
+              side: BorderSide(color: context.borderColor, width: 0.75),
             ),
             title: Row(
               children: [
@@ -1492,7 +1605,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   constraints: const BoxConstraints(maxHeight: 140),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: AppleTheme.darkSurfaceElevated,
+                    color: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: SingleChildScrollView(
@@ -1509,7 +1622,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     child: LinearProgressIndicator(
                       value: downloadProgress,
                       minHeight: 6,
-                      backgroundColor: AppleTheme.darkSurfaceElevated,
+                      backgroundColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
                       valueColor: const AlwaysStoppedAnimation<Color>(AppleTheme.appleRed),
                     ),
                   ),
@@ -1571,7 +1684,7 @@ class _SettingsTabState extends State<SettingsTab> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppleTheme.darkBackground,
+      backgroundColor: context.backgroundColor,
       body: SafeArea(
         bottom: false,
         child: ListView(
@@ -1586,8 +1699,71 @@ class _SettingsTabState extends State<SettingsTab> {
             ),
             const SizedBox(height: 2),
             Text(
-              'Hệ thống, phiên bản và hạ tầng Supabase',
+              'Hệ thống, giao diện và hạ tầng Supabase',
               style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+            ),
+
+            const SizedBox(height: 24),
+
+            // SECTION 0: GIAO DIỆN & CHỦ ĐỀ (THEME) - Chuẩn Apple Music
+            _buildSectionTitle('GIAO DIỆN & CHỦ ĐỀ'),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: context.surfaceColor,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: context.borderColor, width: 0.75),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: AppleTheme.appleBlue, // iOS System Blue
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.palette_rounded, color: Colors.white, size: 18),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Chế độ giao diện',
+                              style: AppleTypography.bodyLarge.copyWith(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              themeManager.themeMode == ThemeMode.system
+                                  ? 'Theo hệ thống'
+                                  : (themeManager.themeMode == ThemeMode.light
+                                      ? 'Giao diện Sáng (Light)'
+                                      : 'Giao diện Tối (AMOLED Dark)'),
+                              style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // Apple-style 3-Segment Control
+                  _ThemeSegmentedPicker(
+                    selectedMode: themeManager.themeMode,
+                    onSelectMode: (mode) {
+                      themeManager.setThemeMode(mode);
+                      setState(() {});
+                    },
+                  ),
+                ],
+              ),
             ),
 
             const SizedBox(height: 24),
@@ -1596,9 +1772,9 @@ class _SettingsTabState extends State<SettingsTab> {
             _buildSectionTitle('BẢN CẬP NHẬT PHẦN MỀM'),
             Container(
               decoration: BoxDecoration(
-                color: AppleTheme.glassSurface,
+                color: context.surfaceColor,
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+                border: Border.all(color: context.borderColor, width: 0.75),
               ),
               child: _buildSettingsRow(
                 icon: Icons.system_update_rounded,
@@ -1639,9 +1815,9 @@ class _SettingsTabState extends State<SettingsTab> {
             _buildSectionTitle('BẢO MẬT & HẠ TẦNG'),
             Container(
               decoration: BoxDecoration(
-                color: AppleTheme.glassSurface,
+                color: context.surfaceColor,
                 borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+                border: Border.all(color: context.borderColor, width: 0.75),
               ),
               child: Column(
                 children: [
@@ -1669,7 +1845,7 @@ class _SettingsTabState extends State<SettingsTab> {
                       ],
                     ),
                   ),
-                  const Divider(color: AppleTheme.hairlineDivider, height: 1, indent: 62),
+                  Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
                   _buildSettingsRow(
                     icon: Icons.fingerprint_rounded,
                     iconColor: AppleTheme.applePurple,
@@ -1677,7 +1853,7 @@ class _SettingsTabState extends State<SettingsTab> {
                     subtitle: 'Đăng nhập ẩn danh tự động (Zero-Login)',
                     trailingWidget: const Icon(Icons.check_circle_rounded, color: AppleTheme.applePurple, size: 20),
                   ),
-                  const Divider(color: AppleTheme.hairlineDivider, height: 1, indent: 62),
+                  Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
                   _buildSettingsRow(
                     icon: Icons.security_rounded,
                     iconColor: AppleTheme.appleAmber,
@@ -1771,6 +1947,92 @@ class _SettingsTabState extends State<SettingsTab> {
             ?trailingWidget,
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Bộ chọn Theme 3 phân đoạn chuẩn Apple Music (Hệ thống / Sáng / Tối)
+class _ThemeSegmentedPicker extends StatelessWidget {
+  final ThemeMode selectedMode;
+  final ValueChanged<ThemeMode> onSelectMode;
+
+  const _ThemeSegmentedPicker({
+    required this.selectedMode,
+    required this.onSelectMode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final options = [
+      (ThemeMode.system, 'Hệ thống', Icons.brightness_auto_rounded),
+      (ThemeMode.light, 'Sáng', Icons.light_mode_rounded),
+      (ThemeMode.dark, 'Tối', Icons.dark_mode_rounded),
+    ];
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final containerBg = isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant;
+    final unselectedText = AppleTheme.textSecondary;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: containerBg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: options.map((option) {
+          final mode = option.$1;
+          final label = option.$2;
+          final icon = option.$3;
+          final isSelected = selectedMode == mode;
+
+          return Expanded(
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                onSelectMode(mode);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppleTheme.appleRed : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: AppleTheme.appleRed.withValues(alpha: 0.35),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 16,
+                      color: isSelected ? Colors.white : unselectedText,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      style: AppleTypography.bodyMedium.copyWith(
+                        fontSize: 13,
+                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                        color: isSelected ? Colors.white : unselectedText,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }

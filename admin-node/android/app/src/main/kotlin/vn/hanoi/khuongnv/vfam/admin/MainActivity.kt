@@ -12,9 +12,25 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "vn.hanoi.khuongnv.vfam.admin/updater"
+    private val FONT_CHANNEL = "vn.hanoi.khuongnv.vfam.admin/system_font"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // Channel cung cấp dữ liệu font hệ thống gốc của máy Android (Samsung One UI, AOSP, ...)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FONT_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getSystemFontData" -> {
+                    try {
+                        val fontData = SystemFontHelper.getSystemFontData()
+                        result.success(fontData)
+                    } catch (e: Exception) {
+                        result.error("FONT_ERROR", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {

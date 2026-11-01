@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../utils/system_font_manager.dart';
 
 /// Floating Dynamic Capsule / Liquid Glass Toast HUD chuẩn Apple Music
 class AppleNotification {
@@ -116,6 +117,12 @@ class _AppleNotificationWidgetState extends State<_AppleNotificationWidget>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xF21E1E22) : const Color(0xF2FFFFFF);
+    final border = isDark ? const Color(0x33FFFFFF) : const Color(0x1F000000);
+    final titleColor = isDark ? Colors.white : Colors.black;
+    final shadowColor = isDark ? Colors.black.withValues(alpha: 0.55) : Colors.black.withValues(alpha: 0.12);
+
     return Positioned(
       top: 0,
       left: 0,
@@ -139,12 +146,12 @@ class _AppleNotificationWidgetState extends State<_AppleNotificationWidget>
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xF21E1E22), // Liquid Glass smoky dark
+                      color: bg,
                       borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: const Color(0x33FFFFFF), width: 0.75),
+                      border: Border.all(color: border, width: 0.75),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.55),
+                          color: shadowColor,
                           blurRadius: 20,
                           offset: const Offset(0, 8),
                         ),
@@ -171,11 +178,18 @@ class _AppleNotificationWidgetState extends State<_AppleNotificationWidget>
                                 widget.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'sans-serif',
+                                style: TextStyle(
+                                  fontFamily: SystemFontManager.fontFamily,
+                                  fontFamilyFallback: [
+                                    SystemFontManager.fontFamily,
+                                    'SamsungSans',
+                                    'sec-roboto-light',
+                                    'sans-serif',
+                                    'Roboto',
+                                  ],
                                   fontSize: 14.5,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.white,
+                                  color: titleColor,
                                   letterSpacing: -0.2,
                                 ),
                               ),
@@ -184,11 +198,18 @@ class _AppleNotificationWidgetState extends State<_AppleNotificationWidget>
                                 widget.message,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'sans-serif',
+                                style: TextStyle(
+                                  fontFamily: SystemFontManager.fontFamily,
+                                  fontFamilyFallback: [
+                                    SystemFontManager.fontFamily,
+                                    'SamsungSans',
+                                    'sec-roboto-light',
+                                    'sans-serif',
+                                    'Roboto',
+                                  ],
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w400,
-                                  color: Color(0xFF8E8E93),
+                                  color: const Color(0xFF8E8E93),
                                   height: 1.25,
                                 ),
                               ),
