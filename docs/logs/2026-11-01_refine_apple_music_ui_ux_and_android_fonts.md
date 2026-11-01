@@ -1,71 +1,50 @@
-# 📋 Nhật Ký Thực Thi: Tái Thiết Kế Giao Diện VFam Admin Chuẩn Apple Music UI/UX & Tối Ưu Typography Hệ Thống
+# 📋 Nhật Ký Thực Thi: Tái Thiết Kế Giao Diện VFam Admin Chuẩn Apple Music UI/UX & Tối Ưu Typography Hệ Thống & Sửa Lỗi Cập Nhật GitHub SemVer
 
-- **Ngày thực hiện**: 2026-11-01 21:45:00
+- **Ngày thực hiện**: 2026-11-01 22:06:00
 - **Agent phụ trách**: `lead-architect` & `parent-ui-specialist`
 - **Yêu cầu gốc**: 
   - So sánh ảnh chụp màn hình trong `docs/ux-ui/` giữa VFam Admin và Android Music Player.
   - Khắc phục triệt để các hạt sạn giao diện: lỗi font chữ, ngắt dòng vụng về (`Khóa khẩn cấp thiết bị` / `con`), chữ bị co ngắn lại (`Phiên` / `phụ` / `huynh`), thanh điều hướng đáy dính sát viền mép thiếu thẩm mỹ.
-  - Tái hiện trọn vẹn bố cục đỉnh cao từ `android-music-player`: Hàng 3 thẻ thống kê nhanh (Signature Quick Stats Pills), thẻ kính Liquid Glass bo góc `22-26dp`, đường viền sáng bạc `0.75dp`, thanh điều hướng đáy nổi (Floating Pill Bar) với khoang đỏ mờ bao quanh tab kích hoạt.
+  - Sửa lỗi updater: Ứng dụng đang ở v1.2.0 nhưng kiểm tra cập nhật lại báo update v1.0.0 (tụt phiên bản/downgrade), gây ra lỗi đăng nhập do tải phải bản dựng cũ chưa cấu hình Anonymous Auth.
+  - Xuất bản chính thức GitHub Release v1.2.1 kèm bộ cài APK hoàn chỉnh.
 - **Trạng thái**: ✅ Hoàn thành
 
 ---
 
-## 1. Phân Tích & Đối Soạn Visual (Visual Audit & Comparison)
+## 1. Phân Tích & Đối Soạn Visual & Bug Root-Cause
 
-Dựa trên phân tích 7 ảnh chụp thực tế trong `docs/ux-ui/`:
-1. **Lỗi Font Chữ**:
-   - Trong phiên bản trước, việc ép cứng `fontFamily: 'sans-serif'` cục bộ trên từng TextStyle khiến Flutter Skia bỏ qua Typeface mặc định theo chủ đề người dùng của máy Samsung (Samsung One UI Sans), gây cảm giác font thô cứng và không hòa nhập với OS.
-   - **Giải pháp**: Xóa bỏ các khai báo cứng `fontFamily`, cấu hình `fontFamily: null` và `typography: Typography.material2021(platform: TargetPlatform.android)` để Flutter tự động ủy quyền kế thừa 100% Typeface gốc của chính thiết bị Android.
-2. **Thiếu Hàng Thẻ Thống Kê Nhanh (Signature 3-Column Stats Grid)**:
-   - Trên Apple Music Player, ngay dưới tiêu đề lớn là hàng 3 thẻ thống kê nhanh bo góc `18dp`: `[19 Bài hát]`, `[1 Album]`, `[1 Nghệ sĩ]` tạo cảm giác chuyên nghiệp, cân đối và nắm bắt dữ liệu ngay tức thì.
-   - **Giải pháp**: Bổ sung ngay hàng 3 thẻ Liquid Glass Stat Pills trên màn hình Giám Sát:
-     - Thẻ 1: `[1 Máy]` • `Trực tuyến` (Icon điện thoại đỏ).
-     - Thẻ 2: `[6h 0m]` • `Hạn mức` (Icon đồng hồ cam).
-     - Thẻ 3: `[An Toàn]` / `[ĐANG KHÓA]` • `Trạng thái` (Icon khiên xanh/đỏ).
-3. **Lỗi Tràn & Ngắt Dòng Chữ (Awkward Text Wrapping)**:
-   - Mục Khóa khẩn cấp bị rớt chữ "con" xuống dòng thứ 2 một mình.
-   - Mục Cài đặt: Do đặt `trailingText: "Anonymous Auth (Zero-Login)"` chiếm 70% chiều ngang hàng khiến nhãn tiêu đề bên trái bị ép co lại thành 3 dòng cụt lủn: "Phiên" / "phụ" / "huynh".
-   - **Giải pháp**:
-     - Viết lại tiêu đề ngắn gọn, súc tích: `Khóa khẩn cấp` (Subtitle: `Tắt màn hình & chặn mọi app ngay`).
-     - Tái cấu trúc chuẩn iOS Settings: Tiêu đề dòng chính nằm trên, mô tả chi tiết (Subtitle) nằm bên dưới, phần Trailing chỉ chứa Icon/Status Badge nhỏ gọn hoặc Chevron `>`.
-4. **Thanh Điều Hướng Đáy Nổi (Liquid Glass Floating Pill Navigation Bar)**:
-   - Trước đây là thanh phẳng dẹt gắn sát đáy màn hình.
-   - **Giải pháp**: Tái hiện chuẩn xác `BottomNavBar.kt` của Apple Music:
-     - Thả nổi cách mép dưới `8dp`, 2 bên lề `16dp`, bo tròn viên thuốc `26dp`.
-     - Nền Liquid Glass tối `Color(0xEE1E1E22)` kèm viền phản chiếu ánh kim siêu mảnh `Color(0x33FFFFFF)`.
-     - Tab kích hoạt được bao bọc bởi viên thuốc bo tròn `20dp` màu đỏ Apple Music `Color(0xFFFA2D55)` mờ `14%` và viền đỏ `28%`.
+### 1.1. Lỗi Cập Nhật Tụt Phiên Bản (Downgrade v1.0.0 Bug):
+- **Nguyên nhân gốc**:
+  1. Trong `github_release_updater.dart`, hàm kiểm tra so sánh phiên bản chỉ dùng toán tử khác nhau: `if (cleanTag != cleanCurrent)`.
+  2. Trên GitHub Releases, trước đó mới chỉ có Release `v1.0.0` được tạo chính thức. Tag `v1.1.0` và `v1.2.0` mới chỉ là Git tag, chưa được publish thành GitHub Release.
+  3. Khi gọi GitHub API `releases/latest`, GitHub trả về `v1.0.0`. Vì `"1.0.0" != "1.2.0"`, app kết luận có bản cập nhật mới và pop-up mời người dùng tải `v1.0.0` (bản cũ từ sáng)!
+  4. Bản `v1.0.0` chưa được bật Anonymous Auth trên Supabase và dính lỗi SQL stored procedure cũ, dẫn đến việc người dùng gặp lỗi đăng nhập.
+- **Giải pháp**:
+  1. Thay thế hoàn toàn bằng thuật toán so sánh **Semantic Versioning (SemVer)**: `isNewerVersion(remoteTag, currentVersion)`. Chỉ khi nào phiên bản remote thực sự lớn hơn phiên bản hiện tại (`remote > current`) thì mới hiển thị cập nhật; tuyệt đối không bao giờ hiển thị bản cũ (chống downgrade).
+  2. Cài đặt GitHub CLI (`gh`), xác thực và xuất bản chính thức GitHub Release `v1.2.1` đính kèm `vfam-admin-1.2.1.apk` (66.5 MB) và `vfam-child-1.2.0.apk` (10.0 MB).
 
----
+### 1.2. Lỗi Font Chữ & Typography:
+- **Đối chiếu `Type.kt` từ `android-music-player`**:
+  - `displayLarge`: `34sp`, `FontWeight.Bold`, `letterSpacing = 0.37.sp`, `lineHeight = 41.sp` (khoảng cách chữ dương, độ nảy lớn, dòng tiêu đề hoành tráng).
+  - `headlineLarge`: `22sp`, `FontWeight.SemiBold`, `letterSpacing = 0.35.sp`.
+  - `titleLarge`: `20sp`, `FontWeight.SemiBold`, `letterSpacing = 0.38.sp`.
+  - `bodyLarge`: `17sp`, `FontWeight.Normal`, `letterSpacing = (-0.41).sp`.
+  - `bodyMedium`: `15sp`, `FontWeight.Normal`, `letterSpacing = (-0.24).sp`.
+  - `labelSmall`: `12sp`, `FontWeight.Medium`, `letterSpacing = 0.sp`.
+- **Giải pháp**: Xây dựng lớp chuẩn hóa `AppleTypography` ánh xạ 1:1 toàn bộ thông số `letterSpacing`, `lineHeight` và `fontWeight` từ `Type.kt` của `android-music-player` vào `TextTheme` của `admin-node/lib/main.dart`.
 
-## 2. Chi Tiết Các Bước Thực Hiện (Execution Steps)
-
-- **Bước 1: Tái thiết kế toàn diện `admin-node/lib/main.dart`**:
-  - Tích hợp hệ token màu & chất liệu `AppleTheme` (AMOLED Dark `#000000`, `glassSurface: 0xEE1E1E22`, `glassBorder: 0x33FFFFFF`).
-  - Xây dựng widget `_buildFloatingBottomNavBar()` nổi cách đáy với hiệu ứng bóng đổ và viên thuốc đỏ bao quanh tab được chọn.
-  - Thêm hàng `_buildQuickStatsGrid()` 3 cột trên Tab Giám Sát.
-  - Làm mới Tab Lịch Sử: Thêm thẻ tóm lược số lượt tương tác (24h) phong cách Ký Ức của Apple Music, khắc phục lỗi va chạm giữa tiêu đề và timestamp.
-  - Làm mới Tab Cài Đặt: Hàng Cập nhật ứng dụng với badge đỏ `v1.2.0 >`, các hàng kết nối với đèn báo xanh `Online`, bảo vệ `Tối cao`.
-- **Bước 2: Kiểm tra chất lượng mã nguồn**:
-  - Chạy `flutter analyze` trong `admin-node/`: Đạt chuẩn `0 errors, 0 warnings, No issues found!`.
-- **Bước 3: Biên dịch Release APK**:
-  - Thực thi `flutter build apk --release` -> hoàn thành sau `132.2s`.
-  - Sao chép và đóng gói thành phẩm vào `release/vfam-admin-1.2.0.apk` (Dung lượng: `66.5 MB`).
+### 1.3. Bố Cục Thẻ & Điều Hướng:
+- Tái hiện **Signature 3-Column Quick Stats Grid** bo góc `18dp`: `[1 Máy]` (Trực tuyến), `[6h 0m]` (Hạn mức), `[An Toàn]` (Trạng thái).
+- Khắc phục rớt dòng: Viết gọn lại `Khóa khẩn cấp` (Subtitle: `Tắt màn hình & chặn mọi app ngay`).
+- Nâng cấp **Liquid Glass Floating Pill Navigation Bar**: Thả nổi cách đáy `8dp`, 2 bên lề `16dp`, bo góc `26dp`, tab kích hoạt có viên thuốc đỏ `AppleRed` bao quanh.
 
 ---
 
-## 3. Danh Sách Tệp Thay Đổi (Impacted Files)
+## 2. Danh Sách Tệp Thay Đổi (Impacted Files)
 
-- `[Modified]`: `admin-node/lib/main.dart` - Tái cấu trúc hoàn toàn UI/UX theo tiêu chuẩn Apple Music Design System.
-- `[Modified]`: `release/vfam-admin-1.2.0.apk` - Bản dựng APK release mới nhất.
-- `[Modified]`: `docs/logs/2026-11-01_refine_apple_music_ui_ux_and_android_fonts.md` - Nhật ký kiểm thử và thiết kế chi tiết.
-
----
-
-## 4. Kiểm Thử & Nghiệm Thu (QA & Verification)
-
-- **Kiểm tra Typo & Layout**:
-  - Hoàn toàn không còn hiện tượng rớt chữ mồ côi (`con` hay `huynh`).
-  - Font chữ tự động render bằng Typeface gốc của máy Android (One UI trên Samsung).
-- **Trải nghiệm Điều hướng**:
-  - Thanh Bottom Bar nổi mượt mà, phản hồi rung nhẹ Haptic Feedback khi chuyển tab.
-  - Tab Giám sát cân đối, trực quan với 3 chỉ số quan trọng nhất đặt trên cùng.
+- `[Modified]`: `admin-node/lib/main.dart` - Tích hợp `AppleTypography` (font hệ thống + letter-spacing chuẩn Apple Music), Liquid Glass Card, Floating Pill Bar.
+- `[Modified]`: `admin-node/lib/services/github_release_updater.dart` - Thuật toán so sánh SemVer `isNewerVersion()`, hỗ trợ chuyển hướng redirect download mượt mà.
+- `[Modified]`: `admin-node/pubspec.yaml` - Nâng phiên bản `1.2.1+3`.
+- `[Modified]`: `.agents/skills/deploy-app/scripts/deploy.ps1` - Tự động phát hiện `gh` CLI và xuất bản GitHub Release.
+- `[Created]`: `release/vfam-admin-1.2.1.apk` - Bản dựng APK release mới nhất (66.5 MB).
+- `[Published]`: [GitHub Release v1.2.1](https://github.com/khuongnv/mdm-parental-control/releases/tag/v1.2.1) - Đính kèm APK đầy đủ trên GitHub.
