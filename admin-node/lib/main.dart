@@ -18,18 +18,20 @@ class MdmParentApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MDM Parent Admin',
+      title: 'VFam Admin',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6750A4),
+          seedColor: const Color(0xFF1E3A8A), // Royal Cobalt Navy
+          secondary: const Color(0xFFF59E0B), // Amber Gold
           brightness: Brightness.light,
         ),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFD0BCFF),
+          seedColor: const Color(0xFF3B82F6), // Royal Blue Light
+          secondary: const Color(0xFFFBBF24), // Gold Light
           brightness: Brightness.dark,
         ),
         useMaterial3: true,

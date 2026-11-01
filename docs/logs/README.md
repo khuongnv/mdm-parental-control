@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-01 | [`2026-11-01_implement_branding_and_app_icons.md`](./2026-11-01_implement_branding_and_app_icons.md) | Tích hợp Nhận diện thương hiệu & App Icon Family Shield (VFam) cho 2 ứng dụng | `lead-architect`, `parent-ui-specialist`, `device-owner-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_integrate_firebase_cloud_messaging.md`](./2026-11-01_integrate_firebase_cloud_messaging.md) | Tích hợp Firebase Cloud Messaging (FCM) & Đổi Package Name sang vn.hanoi.khuongnv.vfam | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `backend-sync-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_review_project_org_and_supabase_storage.md`](./2026-11-01_review_project_org_and_supabase_storage.md) | Rà soát cấu trúc tổ chức dự án và đánh giá tối ưu hóa việc lưu trữ thông tin Supabase trong các ứng dụng | `lead-architect`, `device-owner-specialist`, `backend-sync-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_cleanup_legacy_netcore_backend.md`](./2026-11-01_cleanup_legacy_netcore_backend.md) | Dọn dẹp và tinh gọn project, loại bỏ toàn bộ mã nguồn .NET Core cũ và hoàn thiện cấu trúc Supabase BaaS | `lead-architect` | ✅ Hoàn thành |

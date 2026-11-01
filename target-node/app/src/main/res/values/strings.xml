@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">MDM Child Agent</string>
-    <string name="device_admin_label">MDM Device Guardian</string>
+    <string name="app_name">VFam Child</string>
+    <string name="device_admin_label">VFam Child Guardian</string>
     <string name="device_admin_description">Enterprise-grade device policy controller for Parental Control and Screen Time Management.</string>
 </resources>

@@ -38,6 +38,15 @@ class MainActivity : AppCompatActivity() {
             setPadding(48, 64, 48, 48)
         }
 
+        val headerView = TextView(this).apply {
+            textSize = 22f
+            text = "🌱 VFam Child - Không Gian An Toàn"
+            setTextColor(android.graphics.Color.parseColor("#059669")) // Mint Green
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, 32)
+        }
+        layout.addView(headerView)
+
         val statusView = TextView(this).apply {
             textSize = 18f
             text = if (isDo) {
@@ -84,7 +93,9 @@ class MainActivity : AppCompatActivity() {
         layout.addView(pairingInfoView)
 
         val pairingButton = Button(this).apply {
-            text = "Tạo Mã Ghép Nối Với Phụ Huynh (OTP)"
+            text = "✨ Tạo Mã Ghép Nối Với Phụ Huynh (OTP)"
+            setBackgroundColor(android.graphics.Color.parseColor("#059669")) // Mint Green
+            setTextColor(android.graphics.Color.WHITE)
             setOnClickListener {
                 pairingInfoView.text = "Đang kết nối Supabase để sinh mã OTP..."
                 val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}"
