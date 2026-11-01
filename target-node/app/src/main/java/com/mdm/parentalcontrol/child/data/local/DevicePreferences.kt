@@ -36,11 +36,25 @@ class DevicePreferences @Inject constructor(
         get() = prefs.getString(KEY_FCM_TOKEN, null)
         set(value) = prefs.edit().putString(KEY_FCM_TOKEN, value).apply()
 
+    var pairedAt: Long
+        get() = prefs.getLong(KEY_PAIRED_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_PAIRED_AT, value).apply()
+
     fun savePairing(deviceId: String, otpCode: String?, deviceName: String?) {
         prefs.edit()
             .putString(KEY_DEVICE_ID, deviceId)
             .putString(KEY_OTP_CODE, otpCode)
             .putString(KEY_DEVICE_NAME, deviceName)
+            .apply()
+    }
+
+    fun completePairing(deviceId: String, deviceName: String?) {
+        prefs.edit()
+            .putString(KEY_DEVICE_ID, deviceId)
+            .putString(KEY_DEVICE_NAME, deviceName)
+            .putBoolean(KEY_IS_PAIRED, true)
+            .remove(KEY_OTP_CODE)
+            .putLong(KEY_PAIRED_AT, System.currentTimeMillis())
             .apply()
     }
 
@@ -55,5 +69,6 @@ class DevicePreferences @Inject constructor(
         private const val KEY_OTP_CODE = "otp_code"
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_FCM_TOKEN = "fcm_token"
+        private const val KEY_PAIRED_AT = "paired_at"
     }
 }

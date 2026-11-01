@@ -81,12 +81,54 @@ class MdmSupabaseService {
     if (response is List && response.isNotEmpty) {
       final result = response.first as Map<String, dynamic>;
       if (result['success'] == true) {
+        final deviceId = result['device_id']?.toString();
+        if (deviceId != null) {
+          try {
+            final channel = client.channel('device:$deviceId');
+            channel.subscribe((status, [error]) async {
+              if (status == RealtimeSubscribeStatus.subscribed) {
+                await channel.sendBroadcastMessage(
+                  event: 'PAIRING_SUCCESS',
+                  payload: {
+                    'device_id': deviceId,
+                    'family_id': familyId,
+                    'message': 'Ghép nối thiết bị thành công',
+                    'timestamp': DateTime.now().millisecondsSinceEpoch,
+                  },
+                );
+              }
+            });
+          } catch (e) {
+            debugPrint('⚠️ Error sending realtime pairing broadcast: $e');
+          }
+        }
         return result;
       } else {
         throw Exception(result['message'] ?? 'Ghép nối thất bại');
       }
     } else if (response is Map<String, dynamic>) {
       if (response['success'] == true) {
+        final deviceId = response['device_id']?.toString();
+        if (deviceId != null) {
+          try {
+            final channel = client.channel('device:$deviceId');
+            channel.subscribe((status, [error]) async {
+              if (status == RealtimeSubscribeStatus.subscribed) {
+                await channel.sendBroadcastMessage(
+                  event: 'PAIRING_SUCCESS',
+                  payload: {
+                    'device_id': deviceId,
+                    'family_id': familyId,
+                    'message': 'Ghép nối thiết bị thành công',
+                    'timestamp': DateTime.now().millisecondsSinceEpoch,
+                  },
+                );
+              }
+            });
+          } catch (e) {
+            debugPrint('⚠️ Error sending realtime pairing broadcast: $e');
+          }
+        }
         return response;
       } else {
         throw Exception(response['message'] ?? 'Ghép nối thất bại');

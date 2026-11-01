@@ -139,13 +139,52 @@ class MdmSupabaseClient @Inject constructor() {
     }
 
     /**
+     * Kiểm tra trạng thái đã được ghép nối hay chưa từ bảng pairing_sessions
+     */
+    fun checkPairingStatus(deviceId: String, onResult: (isClaimed: Boolean) -> Unit) {
+        val url = "$supabaseUrl/rest/v1/pairing_sessions?device_id=eq.$deviceId&select=is_claimed,expires_at&order=created_at.desc&limit=1"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .get()
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "checkPairingStatus failed", e)
+                onResult(false)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string()
+                if (response.isSuccessful && !body.isNullOrEmpty()) {
+                    try {
+                        val array = JSONArray(body)
+                        if (array.length() > 0) {
+                            val item = array.getJSONObject(0)
+                            val isClaimed = item.optBoolean("is_claimed", false)
+                            onResult(isClaimed)
+                            return
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse pairing status", e)
+                    }
+                }
+                onResult(false)
+            }
+        })
+    }
+
+    /**
      * Kết nối Supabase Realtime WebSocket (Phoenix Channels Protocol)
-     * Lắng nghe Broadcast Panic Lockdown và Grant Extra Time
+     * Lắng nghe Broadcast Panic Lockdown, Grant Extra Time và Pairing Success
      */
     fun connectRealtime(
         deviceId: String,
         onPanicLockdown: (Boolean) -> Unit,
-        onExtraTime: (Int) -> Unit
+        onExtraTime: (Int) -> Unit,
+        onPairingSuccess: (() -> Unit)? = null
     ) {
         disconnect()
 
@@ -179,6 +218,12 @@ class MdmSupabaseClient @Inject constructor() {
                                     put("schema", "public")
                                     put("table", "devices")
                                     put("filter", "id=eq.$deviceId")
+                                })
+                                put(JSONObject().apply {
+                                    put("event", "UPDATE")
+                                    put("schema", "public")
+                                    put("table", "pairing_sessions")
+                                    put("filter", "device_id=eq.$deviceId")
                                 })
                             }
                             put("postgres_changes", pgChanges)
@@ -229,18 +274,35 @@ class MdmSupabaseClient @Inject constructor() {
                                 Log.i(TAG, "⏳ Supabase Realtime received GRANT_EXTRA_TIME: +$minutes minutes")
                                 onExtraTime(minutes)
                             }
+                            "PAIRING_SUCCESS" -> {
+                                Log.i(TAG, "✨ Supabase Realtime received PAIRING_SUCCESS!")
+                                onPairingSuccess?.invoke()
+                            }
                         }
                     } else if (event == "postgres_changes") {
                         val payload = msg.optJSONObject("payload")
                         val data = payload?.optJSONObject("data")
                         val record = data?.optJSONObject("record")
+                        val table = data?.optString("table")
                         if (record != null) {
-                            val isLocked = record.optBoolean("is_locked", false)
-                            val extraMins = record.optInt("extra_time_minutes", 0)
-                            Log.w(TAG, "⚡ Supabase Postgres Changes: is_locked=$isLocked, extra_time=$extraMins")
-                            onPanicLockdown(isLocked)
-                            if (extraMins > 0) {
-                                onExtraTime(extraMins)
+                            if (table == "pairing_sessions") {
+                                val isClaimed = record.optBoolean("is_claimed", false)
+                                if (isClaimed) {
+                                    Log.i(TAG, "✨ Supabase Postgres Changes: pairing_sessions is_claimed=true")
+                                    onPairingSuccess?.invoke()
+                                }
+                            } else {
+                                val isLocked = record.optBoolean("is_locked", false)
+                                val extraMins = record.optInt("extra_time_minutes", 0)
+                                val familyId = record.optString("family_id", "")
+                                if (familyId.isNotEmpty() && familyId != "null") {
+                                    onPairingSuccess?.invoke()
+                                }
+                                Log.w(TAG, "⚡ Supabase Postgres Changes: is_locked=$isLocked, extra_time=$extraMins")
+                                onPanicLockdown(isLocked)
+                                if (extraMins > 0) {
+                                    onExtraTime(extraMins)
+                                }
                             }
                         }
                     }

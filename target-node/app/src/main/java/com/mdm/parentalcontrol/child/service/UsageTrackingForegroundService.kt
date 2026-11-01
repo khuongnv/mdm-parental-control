@@ -126,6 +126,10 @@ class UsageTrackingForegroundService : LifecycleService() {
                         usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = currentPolicy.dailyLimitMinutes + minutes, isEmergencyLockdown = false))
                         enforceLockdown(false)
                     }
+                },
+                onPairingSuccess = {
+                    Log.i(TAG, "✨ Foreground Service: Device pairing claimed by parent!")
+                    devicePreferences.isPaired = true
                 }
             )
         }
