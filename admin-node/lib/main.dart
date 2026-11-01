@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'services/mdm_supabase_service.dart';
 import 'services/activity_history_service.dart';
 import 'services/github_release_updater.dart';
+import 'widgets/apple_notification.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,11 +42,12 @@ class AppleTheme {
   static const Color textSecondary = Color(0xFF8E8E93); // Gray93
 }
 
-/// Hệ Typography khớp 100% với Type.kt của dự án Android Music Player
+/// Hệ Typography ánh xạ chính xác 100% với Type.kt của dự án Android Music Player
 class AppleTypography {
   static const String fontFamily = 'sans-serif';
   static const List<String> fontFamilyFallback = ['sans-serif', 'sans-serif-medium', 'Roboto'];
 
+  // Large Title (displayLarge) cho header: 34sp Bold, letterSpacing 0.37sp, lineHeight 41sp
   static const TextStyle displayLarge = TextStyle(
     fontFamily: fontFamily,
     fontFamilyFallback: fontFamilyFallback,
@@ -56,6 +58,7 @@ class AppleTypography {
     color: AppleTheme.textPrimary,
   );
 
+  // Section headers (headlineLarge): 22sp SemiBold, letterSpacing 0.35sp, lineHeight 28sp
   static const TextStyle headlineLarge = TextStyle(
     fontFamily: fontFamily,
     fontFamilyFallback: fontFamilyFallback,
@@ -66,6 +69,7 @@ class AppleTypography {
     color: AppleTheme.textPrimary,
   );
 
+  // Sub-headers or stats (titleLarge): 20sp SemiBold, letterSpacing 0.38sp, lineHeight 25sp
   static const TextStyle titleLarge = TextStyle(
     fontFamily: fontFamily,
     fontFamilyFallback: fontFamilyFallback,
@@ -76,6 +80,7 @@ class AppleTypography {
     color: AppleTheme.textPrimary,
   );
 
+  // List item primary text (bodyLarge): 17sp, letterSpacing -0.41sp, lineHeight 22sp
   static const TextStyle bodyLarge = TextStyle(
     fontFamily: fontFamily,
     fontFamilyFallback: fontFamilyFallback,
@@ -86,6 +91,7 @@ class AppleTypography {
     color: AppleTheme.textPrimary,
   );
 
+  // List item secondary text (bodyMedium): 15sp, letterSpacing -0.24sp, lineHeight 20sp
   static const TextStyle bodyMedium = TextStyle(
     fontFamily: fontFamily,
     fontFamilyFallback: fontFamilyFallback,
@@ -96,6 +102,7 @@ class AppleTypography {
     color: AppleTheme.textSecondary,
   );
 
+  // Small labels/captions (labelSmall): 12sp Medium, letterSpacing 0sp, lineHeight 16sp
   static const TextStyle labelSmall = TextStyle(
     fontFamily: fontFamily,
     fontFamilyFallback: fontFamilyFallback,
@@ -256,6 +263,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               Text(
                 label,
                 style: TextStyle(
+                  fontFamily: AppleTypography.fontFamily,
+                  fontFamilyFallback: AppleTypography.fontFamilyFallback,
                   fontSize: 10.5,
                   fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                   color: isSelected ? AppleTheme.appleRed : AppleTheme.textSecondary,
@@ -332,7 +341,7 @@ class _DashboardTabState extends State<DashboardTab> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          errorMessage = e.toString();
+          errorMessage = e.toString().replaceFirst('Exception: ', '');
           isLoading = false;
         });
       }
@@ -349,14 +358,17 @@ class _DashboardTabState extends State<DashboardTab> {
           borderRadius: BorderRadius.circular(22),
           side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
         ),
-        title: const Text('Ghép Nối Thiết Bị Con', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+        title: Text(
+          'Ghép Nối Thiết Bị Con',
+          style: AppleTypography.titleLarge.copyWith(fontSize: 19, fontWeight: FontWeight.w700),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Nhập mã OTP 6 chữ số đang hiển thị trên ứng dụng VFam Child của con:',
-              style: TextStyle(color: AppleTheme.textSecondary, fontSize: 14, height: 1.3),
+              style: AppleTypography.bodyMedium.copyWith(fontSize: 14, height: 1.35),
             ),
             const SizedBox(height: 20),
             TextField(
@@ -364,7 +376,9 @@ class _DashboardTabState extends State<DashboardTab> {
               keyboardType: TextInputType.number,
               maxLength: 6,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
+                fontFamily: AppleTypography.fontFamily,
+                fontFamilyFallback: AppleTypography.fontFamilyFallback,
                 fontSize: 28,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 8,
@@ -384,7 +398,10 @@ class _DashboardTabState extends State<DashboardTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Hủy', style: TextStyle(color: AppleTheme.textSecondary, fontSize: 15)),
+            child: Text(
+              'Hủy',
+              style: AppleTypography.bodyMedium.copyWith(fontSize: 15, color: AppleTheme.textSecondary),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -394,38 +411,48 @@ class _DashboardTabState extends State<DashboardTab> {
             onPressed: () async {
               final otp = otpController.text.trim();
               if (otp.length != 6) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Vui lòng nhập đủ 6 chữ số OTP')),
+                AppleNotification.show(
+                  context,
+                  title: 'Mã OTP Chưa Đủ',
+                  message: 'Vui lòng nhập đủ 6 chữ số OTP từ thiết bị con',
+                  icon: Icons.pin_outlined,
+                  iconColor: AppleTheme.appleAmber,
                 );
                 return;
               }
               Navigator.pop(ctx);
               try {
                 final result = await _supabaseService.claimDevice(otp);
+                final devName = result['device_name'] ?? 'Thiết bị con';
                 await ActivityHistoryService.logActivity(
                   type: ActivityType.pairing,
-                  title: 'Ghép Nối Thiết Bị Thành Công',
-                  subtitle: result['device_name'] != null ? 'Đã liên kết thiết bị: ${result['device_name']}' : 'Ghép nối thành công',
+                  title: 'Ghép Nối Thành Công',
+                  subtitle: 'Đã liên kết thiết bị: $devName',
                 );
                 widget.onActionLogged();
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      backgroundColor: AppleTheme.appleGreen,
-                      content: Text(result['message'] ?? 'Ghép nối thiết bị thành công!'),
-                    ),
+                  AppleNotification.show(
+                    context,
+                    title: 'Ghép Nối Thành Công',
+                    message: 'Đã liên kết hoàn tất với $devName',
+                    icon: Icons.check_circle_rounded,
+                    iconColor: AppleTheme.appleGreen,
                   );
                   _loadDeviceData();
                 }
               } catch (e) {
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi: $e')),
+                  AppleNotification.show(
+                    context,
+                    title: 'Ghép Nối Thất Bại',
+                    message: e.toString().replaceFirst('Exception: ', ''),
+                    icon: Icons.error_outline_rounded,
+                    iconColor: AppleTheme.appleRed,
                   );
                 }
               }
             },
-            child: const Text('Xác Nhận', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+            child: Text('Xác Nhận', style: AppleTypography.bodyMedium.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white)),
           ),
         ],
       ),
@@ -451,19 +478,25 @@ class _DashboardTabState extends State<DashboardTab> {
       widget.onActionLogged();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: targetLock ? AppleTheme.appleRed : AppleTheme.appleGreen,
-            content: Text(targetLock ? '🚨 Đã gửi lệnh KHÓA KHẨN CẤP tới $deviceName' : '✅ Đã MỞ KHÓA cho $deviceName'),
-            duration: const Duration(seconds: 2),
-          ),
+        AppleNotification.show(
+          context,
+          title: targetLock ? 'Khóa Khẩn Cấp' : 'Mở Khóa Thiết Bị',
+          message: targetLock
+              ? 'Đã kích hoạt khóa màn hình tức thì tới $deviceName'
+              : 'Đã gỡ khóa và khôi phục hoạt động cho $deviceName',
+          icon: targetLock ? Icons.lock_rounded : Icons.lock_open_rounded,
+          iconColor: targetLock ? AppleTheme.appleRed : AppleTheme.appleGreen,
         );
       }
     } catch (e) {
       if (mounted) {
         setState(() => isEmergencyLocked = !targetLock);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi gửi lệnh: $e')),
+        AppleNotification.show(
+          context,
+          title: 'Lỗi Gửi Lệnh',
+          message: e.toString().replaceFirst('Exception: ', ''),
+          icon: Icons.error_outline_rounded,
+          iconColor: AppleTheme.appleRed,
         );
       }
     }
@@ -491,18 +524,22 @@ class _DashboardTabState extends State<DashboardTab> {
       widget.onActionLogged();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppleTheme.appleBlue,
-            content: Text('🎁 Đã thưởng +$minutes phút cho $deviceName'),
-            duration: const Duration(seconds: 2),
-          ),
+        AppleNotification.show(
+          context,
+          title: 'Thưởng Giờ Sử Dụng',
+          message: 'Đã cộng thêm +$minutes phút sử dụng cho $deviceName',
+          icon: Icons.more_time_rounded,
+          iconColor: AppleTheme.appleBlue,
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi cộng giờ: $e')),
+        AppleNotification.show(
+          context,
+          title: 'Lỗi Cộng Giờ',
+          message: e.toString().replaceFirst('Exception: ', ''),
+          icon: Icons.error_outline_rounded,
+          iconColor: AppleTheme.appleRed,
         );
       }
     }
@@ -576,12 +613,7 @@ class _DashboardTabState extends State<DashboardTab> {
           children: [
             const Text(
               'Giám Sát',
-              style: TextStyle(
-                fontSize: 34,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.5,
-                color: AppleTheme.textPrimary,
-              ),
+              style: AppleTypography.displayLarge,
             ),
             Row(
               children: [
@@ -593,13 +625,9 @@ class _DashboardTabState extends State<DashboardTab> {
           ],
         ),
         const SizedBox(height: 2),
-        const Text(
+        Text(
           'Quản lý thời gian thực và bảo vệ thiết bị con',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w400,
-            color: AppleTheme.textSecondary,
-          ),
+          style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
         ),
       ],
     );
@@ -681,18 +709,18 @@ class _DashboardTabState extends State<DashboardTab> {
               value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 16,
+              style: AppleTypography.titleLarge.copyWith(
+                fontSize: 16.5,
                 fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
                 color: AppleTheme.textPrimary,
               ),
             ),
             Text(
               label,
               maxLines: 1,
-              style: const TextStyle(
+              style: AppleTypography.labelSmall.copyWith(
                 fontSize: 11,
-                fontWeight: FontWeight.w400,
                 color: AppleTheme.textSecondary,
               ),
             ),
@@ -707,11 +735,11 @@ class _DashboardTabState extends State<DashboardTab> {
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         title,
-        style: const TextStyle(
+        style: AppleTypography.labelSmall.copyWith(
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppleTheme.textSecondary,
-          letterSpacing: 0.4,
+          letterSpacing: 0.35,
         ),
       ),
     );
@@ -756,7 +784,7 @@ class _DashboardTabState extends State<DashboardTab> {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3),
+              style: AppleTypography.bodyMedium.copyWith(color: Colors.white, fontSize: 13, height: 1.3),
             ),
           ),
         ],
@@ -804,10 +832,9 @@ class _DashboardTabState extends State<DashboardTab> {
                     Flexible(
                       child: Text(
                         deviceName,
-                        style: const TextStyle(
+                        style: AppleTypography.bodyLarge.copyWith(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: AppleTheme.textPrimary,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -826,10 +853,7 @@ class _DashboardTabState extends State<DashboardTab> {
                 const SizedBox(height: 3),
                 Text(
                   hasDevice ? '$model • $osVersion' : model,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppleTheme.textSecondary,
-                  ),
+                  style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                 ),
               ],
             ),
@@ -842,7 +866,10 @@ class _DashboardTabState extends State<DashboardTab> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               ),
-              child: const Text('Ghép Nối', style: TextStyle(color: AppleTheme.appleRed, fontWeight: FontWeight.w600)),
+              child: Text(
+                'Ghép Nối',
+                style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.appleRed, fontWeight: FontWeight.w600, fontSize: 13),
+              ),
             ),
         ],
       ),
@@ -868,11 +895,10 @@ class _DashboardTabState extends State<DashboardTab> {
             children: [
               Text(
                 '${totalAllowedMins ~/ 60}h ${totalAllowedMins % 60}m Cho Phép',
-                style: const TextStyle(
+                style: AppleTypography.headlineLarge.copyWith(
                   fontSize: 26,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                  color: AppleTheme.textPrimary,
+                  letterSpacing: 0.35,
                 ),
               ),
               if (extraTimeMinutes > 0)
@@ -885,7 +911,7 @@ class _DashboardTabState extends State<DashboardTab> {
                   ),
                   child: Text(
                     '+$extraTimeMinutes phút',
-                    style: const TextStyle(
+                    style: AppleTypography.labelSmall.copyWith(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: AppleTheme.appleBlue,
@@ -911,7 +937,7 @@ class _DashboardTabState extends State<DashboardTab> {
             isEmergencyLocked
                 ? '🚨 Thiết bị đang ở trạng thái Khóa Khẩn Cấp tầng hệ điều hành.'
                 : '🛡️ Thiết bị đang trong khung giờ an toàn và được quản lý bảo vệ.',
-            style: TextStyle(
+            style: AppleTypography.bodyMedium.copyWith(
               fontSize: 13,
               color: isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.textSecondary,
               fontWeight: isEmergencyLocked ? FontWeight.w600 : FontWeight.w400,
@@ -938,18 +964,18 @@ class _DashboardTabState extends State<DashboardTab> {
               children: [
                 _buildSmallIconBox(Icons.lock_rounded, AppleTheme.appleRed),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Khóa khẩn cấp',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppleTheme.textPrimary),
+                        style: AppleTypography.bodyLarge.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
                       ),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
                         'Tắt màn hình & chặn mọi app ngay',
-                        style: TextStyle(fontSize: 13, color: AppleTheme.textSecondary),
+                        style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                       ),
                     ],
                   ),
@@ -975,17 +1001,17 @@ class _DashboardTabState extends State<DashboardTab> {
                   children: [
                     _buildSmallIconBox(Icons.more_time_rounded, AppleTheme.appleBlue),
                     const SizedBox(width: 14),
-                    const Column(
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Thưởng thêm thời gian',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppleTheme.textPrimary),
+                          style: AppleTypography.bodyLarge.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 2),
                         Text(
                           'Cộng thêm giờ sử dụng cho con',
-                          style: TextStyle(fontSize: 13, color: AppleTheme.textSecondary),
+                          style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                         ),
                       ],
                     ),
@@ -1035,10 +1061,9 @@ class _DashboardTabState extends State<DashboardTab> {
         alignment: Alignment.center,
         child: Text(
           label,
-          style: const TextStyle(
+          style: AppleTypography.bodyLarge.copyWith(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: AppleTheme.textPrimary,
           ),
         ),
       ),
@@ -1081,6 +1106,15 @@ class _HistoryTabState extends State<HistoryTab> {
   Future<void> _clearHistory() async {
     await ActivityHistoryService.clearHistory();
     refresh();
+    if (mounted) {
+      AppleNotification.show(
+        context,
+        title: 'Đã Xóa Lịch Sử',
+        message: 'Toàn bộ nhật ký hoạt động đã được làm sạch.',
+        icon: Icons.delete_sweep_rounded,
+        iconColor: AppleTheme.appleAmber,
+      );
+    }
   }
 
   @override
@@ -1104,12 +1138,7 @@ class _HistoryTabState extends State<HistoryTab> {
                     children: [
                       const Text(
                         'Lịch Sử',
-                        style: TextStyle(
-                          fontSize: 34,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.5,
-                          color: AppleTheme.textPrimary,
-                        ),
+                        style: AppleTypography.displayLarge,
                       ),
                       Row(
                         children: [
@@ -1125,17 +1154,20 @@ class _HistoryTabState extends State<HistoryTab> {
                                     borderRadius: BorderRadius.circular(22),
                                     side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
                                   ),
-                                  title: const Text('Xóa lịch sử?'),
-                                  content: const Text('Toàn bộ nhật ký gửi lệnh sẽ được làm sạch.', style: TextStyle(color: AppleTheme.textSecondary)),
+                                  title: Text('Xóa lịch sử?', style: AppleTypography.titleLarge),
+                                  content: Text('Toàn bộ nhật ký gửi lệnh sẽ được làm sạch.', style: AppleTypography.bodyMedium),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy', style: TextStyle(color: AppleTheme.textSecondary))),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: Text('Hủy', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary)),
+                                    ),
                                     FilledButton(
                                       style: FilledButton.styleFrom(backgroundColor: AppleTheme.appleRed),
                                       onPressed: () {
                                         Navigator.pop(ctx);
                                         _clearHistory();
                                       },
-                                      child: const Text('Xóa'),
+                                      child: Text('Xóa', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
                                     ),
                                   ],
                                 ),
@@ -1151,13 +1183,9 @@ class _HistoryTabState extends State<HistoryTab> {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  const Text(
+                  Text(
                     'Dòng thời gian tương tác và điều khiển thiết bị',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      color: AppleTheme.textSecondary,
-                    ),
+                    style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                   ),
                 ],
               ),
@@ -1189,14 +1217,14 @@ class _HistoryTabState extends State<HistoryTab> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Tổng số tương tác',
-                            style: TextStyle(fontSize: 13, color: AppleTheme.textSecondary),
+                            style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             '${_activities.length} sự kiện',
-                            style: const TextStyle(
+                            style: AppleTypography.headlineLarge.copyWith(
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
                               color: AppleTheme.appleRed,
@@ -1211,9 +1239,9 @@ class _HistoryTabState extends State<HistoryTab> {
                         color: AppleTheme.appleRed.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Thời gian thực',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppleTheme.appleRed),
+                        style: AppleTypography.labelSmall.copyWith(fontSize: 12, fontWeight: FontWeight.w600, color: AppleTheme.appleRed),
                       ),
                     ),
                   ],
@@ -1225,13 +1253,13 @@ class _HistoryTabState extends State<HistoryTab> {
 
             Padding(
               padding: const EdgeInsets.only(left: 20, bottom: 8),
-              child: const Text(
+              child: Text(
                 'DÒNG THỜI GIAN HOẠT ĐỘNG',
-                style: TextStyle(
+                style: AppleTypography.labelSmall.copyWith(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: AppleTheme.textSecondary,
-                  letterSpacing: 0.4,
+                  letterSpacing: 0.35,
                 ),
               ),
             ),
@@ -1240,8 +1268,8 @@ class _HistoryTabState extends State<HistoryTab> {
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator(color: AppleTheme.appleRed))
                   : _activities.isEmpty
-                      ? const Center(
-                          child: Text('Chưa có lịch sử hoạt động', style: TextStyle(color: AppleTheme.textSecondary)),
+                      ? Center(
+                          child: Text('Chưa có lịch sử hoạt động', style: AppleTypography.bodyMedium),
                         )
                       : Container(
                           margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -1326,17 +1354,16 @@ class _HistoryTabState extends State<HistoryTab> {
                         item.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: AppleTypography.bodyLarge.copyWith(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          color: AppleTheme.textPrimary,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       timeStr,
-                      style: const TextStyle(
+                      style: AppleTypography.labelSmall.copyWith(
                         fontSize: 12,
                         color: AppleTheme.textSecondary,
                       ),
@@ -1346,7 +1373,7 @@ class _HistoryTabState extends State<HistoryTab> {
                 const SizedBox(height: 3),
                 Text(
                   item.subtitle,
-                  style: const TextStyle(
+                  style: AppleTypography.bodyMedium.copyWith(
                     fontSize: 13,
                     color: AppleTheme.textSecondary,
                     height: 1.3,
@@ -1385,7 +1412,7 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   final ParentAppUpdater _updater = ParentAppUpdater();
 
-  String currentVersion = '1.2.1';
+  String currentVersion = '1.2.2';
   bool isCheckingUpdate = false;
   double? downloadProgress;
 
@@ -1416,10 +1443,13 @@ class _SettingsTabState extends State<SettingsTab> {
             borderRadius: BorderRadius.circular(22),
             side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
           ),
-          title: const Text('Ứng Dụng Đã Mới Nhất'),
-          content: Text('VFam Admin đang ở phiên bản mới nhất ($currentVersion). Không có bản cập nhật nào.'),
+          title: Text('Ứng Dụng Đã Mới Nhất', style: AppleTypography.titleLarge),
+          content: Text('VFam Admin đang ở phiên bản mới nhất ($currentVersion). Không có bản cập nhật nào.', style: AppleTypography.bodyMedium),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK', style: TextStyle(color: AppleTheme.appleRed))),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('OK', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.appleRed, fontWeight: FontWeight.w600)),
+            ),
           ],
         ),
       );
@@ -1444,7 +1474,7 @@ class _SettingsTabState extends State<SettingsTab> {
               children: [
                 const Icon(Icons.system_update_rounded, color: AppleTheme.appleRed),
                 const SizedBox(width: 10),
-                Text('Bản Cập Nhật ${release.tagName}'),
+                Text('Bản Cập Nhật ${release.tagName}', style: AppleTypography.titleLarge),
               ],
             ),
             content: Column(
@@ -1453,10 +1483,10 @@ class _SettingsTabState extends State<SettingsTab> {
               children: [
                 Text(
                   'Phát hành: ${release.publishedAt.split('T').first}',
-                  style: const TextStyle(color: AppleTheme.textSecondary, fontSize: 13),
+                  style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                 ),
                 const SizedBox(height: 12),
-                const Text('Nội dung cập nhật:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                Text('Nội dung cập nhật:', style: AppleTypography.bodyLarge.copyWith(fontWeight: FontWeight.w600, fontSize: 14)),
                 const SizedBox(height: 6),
                 Container(
                   constraints: const BoxConstraints(maxHeight: 140),
@@ -1468,7 +1498,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   child: SingleChildScrollView(
                     child: Text(
                       release.releaseNotes.isNotEmpty ? release.releaseNotes : 'Bản cập nhật tối ưu hóa giao diện và trải nghiệm.',
-                      style: const TextStyle(color: AppleTheme.textSecondary, fontSize: 13, height: 1.3),
+                      style: AppleTypography.bodyMedium.copyWith(fontSize: 13, height: 1.3),
                     ),
                   ),
                 ),
@@ -1487,7 +1517,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   Center(
                     child: Text(
                       'Đang tải: ${(downloadProgress! * 100).toStringAsFixed(1)}%',
-                      style: const TextStyle(color: AppleTheme.appleRed, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: AppleTypography.labelSmall.copyWith(color: AppleTheme.appleRed, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -1497,7 +1527,7 @@ class _SettingsTabState extends State<SettingsTab> {
               if (downloadProgress == null) ...[
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Để Sau', style: TextStyle(color: AppleTheme.textSecondary, fontSize: 15)),
+                  child: Text('Để Sau', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary, fontSize: 15)),
                 ),
                 FilledButton(
                   style: FilledButton.styleFrom(
@@ -1518,13 +1548,17 @@ class _SettingsTabState extends State<SettingsTab> {
                     } catch (e) {
                       setDialogState(() => downloadProgress = null);
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi tải: $e')),
+                        AppleNotification.show(
+                          context,
+                          title: 'Lỗi Tải Bản Cập Nhật',
+                          message: e.toString().replaceFirst('Exception: ', ''),
+                          icon: Icons.error_outline_rounded,
+                          iconColor: AppleTheme.appleRed,
                         );
                       }
                     }
                   },
-                  child: const Text('Cập Nhật Ngay', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                  child: Text('Cập Nhật Ngay', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, fontSize: 15, color: Colors.white)),
                 ),
               ],
             ],
@@ -1548,21 +1582,12 @@ class _SettingsTabState extends State<SettingsTab> {
             // Large Title & Subtitle
             const Text(
               'Cài Đặt',
-              style: TextStyle(
-                fontSize: 34,
-                fontWeight: FontWeight.w700,
-                letterSpacing: -0.5,
-                color: AppleTheme.textPrimary,
-              ),
+              style: AppleTypography.displayLarge,
             ),
             const SizedBox(height: 2),
-            const Text(
+            Text(
               'Hệ thống, phiên bản và hạ tầng Supabase',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w400,
-                color: AppleTheme.textSecondary,
-              ),
+              style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
             ),
 
             const SizedBox(height: 24),
@@ -1594,7 +1619,7 @@ class _SettingsTabState extends State<SettingsTab> {
                           children: [
                             Text(
                               'v$currentVersion',
-                              style: const TextStyle(
+                              style: AppleTypography.labelSmall.copyWith(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
                                 color: AppleTheme.appleRed,
@@ -1637,9 +1662,9 @@ class _SettingsTabState extends State<SettingsTab> {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        const Text(
+                        Text(
                           'Online',
-                          style: TextStyle(fontSize: 13, color: AppleTheme.appleGreen, fontWeight: FontWeight.w600),
+                          style: AppleTypography.labelSmall.copyWith(fontSize: 13, color: AppleTheme.appleGreen, fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
@@ -1664,9 +1689,9 @@ class _SettingsTabState extends State<SettingsTab> {
                         color: AppleTheme.appleAmber.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Tối cao',
-                        style: TextStyle(fontSize: 12, color: AppleTheme.appleAmber, fontWeight: FontWeight.w600),
+                        style: AppleTypography.labelSmall.copyWith(fontSize: 12, color: AppleTheme.appleAmber, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -1687,11 +1712,11 @@ class _SettingsTabState extends State<SettingsTab> {
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         title,
-        style: const TextStyle(
+        style: AppleTypography.labelSmall.copyWith(
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppleTheme.textSecondary,
-          letterSpacing: 0.4,
+          letterSpacing: 0.35,
         ),
       ),
     );
@@ -1728,18 +1753,16 @@ class _SettingsTabState extends State<SettingsTab> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: AppleTypography.bodyLarge.copyWith(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: AppleTheme.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: const TextStyle(
+                    style: AppleTypography.bodyMedium.copyWith(
                       fontSize: 13,
-                      color: AppleTheme.textSecondary,
                     ),
                   ),
                 ],
