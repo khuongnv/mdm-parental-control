@@ -1,0 +1,70 @@
+# ==========================================
+# MDM Parental Control - .gitignore
+# ==========================================
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.iml
+.project
+.classpath
+.settings/
+
+# Android & Gradle (target-node / admin-node)
+.gradle/
+build/
+*/build/
+*/*/build/
+local.properties
+.cxx/
+*.apk
+*.aab
+*.dex
+captures/
+output.json
+
+# .NET & Visual Studio (backend)
+bin/
+obj/
+*/bin/
+*/obj/
+*/*/bin/
+*/*/obj/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+*.nupkg
+*.snupkg
+appsettings.Development.json
+appsettings.Local.json
+
+# Node.js / React Native (if used)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Flutter / Dart (admin-node)
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+*/flutter_export_environment.sh
+
+# Logs & Environment Secrets
+*.log
+.env
+.env.local
+.env.production
