@@ -28,8 +28,12 @@ android {
         if (localPropertiesFile.exists()) {
             properties.load(localPropertiesFile.inputStream())
         }
-        val supabaseUrl = properties.getProperty("supabase.url") ?: "https://ueamgqbxgyzxruzzjofm.supabase.co"
-        val supabaseAnonKey = properties.getProperty("supabase.anon.key") ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlYW1ncWJ4Z3l6eHJ1enpqb2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1MjQyMjAsImV4cCI6MjEwOTEwMDIyMH0.D7qTyUR-_fAMZMrjZejKuX06ZycZsMMq-9zKBpBGFFc"
+        val supabaseUrl = System.getenv("SUPABASE_URL")
+            ?: properties.getProperty("supabase.url")
+            ?: "https://ueamgqbxgyzxruzzjofm.supabase.co"
+        val supabaseAnonKey = System.getenv("SUPABASE_ANON_KEY")
+            ?: properties.getProperty("supabase.anon.key")
+            ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlYW1ncWJ4Z3l6eHJ1enpqb2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1MjQyMjAsImV4cCI6MjEwOTEwMDIyMH0.D7qTyUR-_fAMZMrjZejKuX06ZycZsMMq-9zKBpBGFFc"
 
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")

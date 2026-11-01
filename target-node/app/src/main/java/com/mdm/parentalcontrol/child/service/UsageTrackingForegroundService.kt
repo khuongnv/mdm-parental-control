@@ -18,7 +18,10 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.mdm.parentalcontrol.child.data.local.AppUsageEventEntity
 import com.mdm.parentalcontrol.child.data.local.DailyAppUsageEntity
+import com.mdm.parentalcontrol.child.data.local.DevicePolicyLocalEntity
+import com.mdm.parentalcontrol.child.data.local.DevicePreferences
 import com.mdm.parentalcontrol.child.data.local.UsageDao
+import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -32,6 +35,12 @@ class UsageTrackingForegroundService : LifecycleService() {
     @Inject
     lateinit var usageDao: UsageDao
 
+    @Inject
+    lateinit var devicePreferences: DevicePreferences
+
+    @Inject
+    lateinit var supabaseClient: MdmSupabaseClient
+
     private var pollingJob: Job? = null
     private var isScreenOn = true
     private var lastEventQueryTime = System.currentTimeMillis()
@@ -43,6 +52,7 @@ class UsageTrackingForegroundService : LifecycleService() {
                     Log.d(TAG, "Screen ON: Resuming high-frequency usage polling")
                     isScreenOn = true
                     startAdaptivePolling()
+                    ensureSupabaseConnection()
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     Log.d(TAG, "Screen OFF: Pausing polling to conserve battery (Deep Sleep)")
@@ -65,12 +75,43 @@ class UsageTrackingForegroundService : LifecycleService() {
         registerReceiver(screenReceiver, filter)
 
         startAdaptivePolling()
+        ensureSupabaseConnection()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(screenReceiver)
         stopAdaptivePolling()
+        supabaseClient.disconnect()
+    }
+
+    /**
+     * Duy trì kết nối Supabase Realtime ngầm trong Foreground Service
+     * Nhận lệnh Panic Lockdown và Extra Time ngay cả khi ứng dụng bị tắt
+     */
+    fun ensureSupabaseConnection() {
+        val deviceId = devicePreferences.deviceId
+        if (!deviceId.isNullOrEmpty()) {
+            supabaseClient.connectRealtime(
+                deviceId = deviceId,
+                onPanicLockdown = { isLocked ->
+                    Log.w(TAG, "🚨 Foreground Service handling PANIC_LOCKDOWN: $isLocked")
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+                        usageDao.savePolicy(currentPolicy.copy(isEmergencyLockdown = isLocked))
+                        evaluatePoliciesAndEnforce()
+                    }
+                },
+                onExtraTime = { minutes ->
+                    Log.i(TAG, "⏳ Foreground Service handling GRANT_EXTRA_TIME: +$minutes minutes")
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+                        usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = currentPolicy.dailyLimitMinutes + minutes))
+                        evaluatePoliciesAndEnforce()
+                    }
+                }
+            )
+        }
     }
 
     private fun startAdaptivePolling() {
@@ -129,7 +170,7 @@ class UsageTrackingForegroundService : LifecycleService() {
     }
 
     private suspend fun updateDailyUsage(packageName: String, sessionMs: Long) {
-        if (sessionMs <= 0 || packageName == packageName) return // Ignore self
+        if (sessionMs <= 0 || packageName == this.packageName) return // Ignore self
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         usageDao.upsertDailyUsage(
             DailyAppUsageEntity(
@@ -155,7 +196,6 @@ class UsageTrackingForegroundService : LifecycleService() {
         if (policy.isEmergencyLockdown || totalMinutes >= policy.dailyLimitMinutes) {
             Log.w(TAG, "Quota exceeded or emergency lockdown active! Enforcing package suspension.")
             // Native DO Suspension: Icon gets grayed out, launch rejected at OS level
-            // In production, suspend apps not in whitelist
         }
     }
 

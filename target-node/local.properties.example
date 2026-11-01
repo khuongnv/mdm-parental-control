@@ -1,0 +1,7 @@
+## This file must *NOT* be checked into Version Control Systems.
+# Copy this file to local.properties and customize for your environment.
+
+sdk.dir=C\:\\Users\\<username>\\AppData\\Local\\Android\\Sdk
+
+supabase.url=https\://<your-project-ref>.supabase.co
+supabase.anon.key=<your-anon-key>

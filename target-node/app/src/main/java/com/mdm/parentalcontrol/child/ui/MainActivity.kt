@@ -8,6 +8,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import com.mdm.parentalcontrol.child.data.local.DevicePreferences
 import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
 import dagger.hilt.android.AndroidEntryPoint
@@ -18,6 +19,9 @@ class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var supabaseClient: MdmSupabaseClient
+
+    @Inject
+    lateinit var devicePreferences: DevicePreferences
 
     private var activeDeviceId: String? = null
 
@@ -43,10 +47,25 @@ class MainActivity : AppCompatActivity() {
         }
         layout.addView(statusView)
 
+        val savedId = devicePreferences.deviceId
+        val savedOtp = devicePreferences.otpCode
+        val savedDeviceName = devicePreferences.deviceName
+        activeDeviceId = savedId
+
+        val initialInfo = if (!savedId.isNullOrEmpty()) {
+            "⚡ Đã lưu cấu hình thiết bị:\n\n" +
+                    "👉 Thiết bị: ${savedDeviceName ?: "Thiết bị con"}\n" +
+                    "👉 Device ID: $savedId\n" +
+                    (if (!savedOtp.isNullOrEmpty()) "👉 Mã OTP gần nhất: [ $savedOtp ]\n" else "") +
+                    "\nTrạng thái: Đang kết nối nền qua Foreground Service."
+        } else {
+            "⚡ Kết nối Supabase: Chưa tạo mã ghép nối"
+        }
+
         val pairingInfoView = TextView(this).apply {
             textSize = 16f
             setPadding(0, 48, 0, 24)
-            text = "⚡ Kết nối Supabase: Chưa tạo mã ghép nối"
+            text = initialInfo
         }
         layout.addView(pairingInfoView)
 
@@ -60,6 +79,9 @@ class MainActivity : AppCompatActivity() {
                     model = Build.MODEL,
                     osVersion = "Android ${Build.VERSION.RELEASE}",
                     onSuccess = { result ->
+                        // Lưu vĩnh viễn vào DevicePreferences để không mất khi restart app/OS
+                        devicePreferences.savePairing(result.deviceId, result.otpCode, deviceName)
+
                         runOnUiThread {
                             activeDeviceId = result.deviceId
                             pairingInfoView.text = "🔑 MÃ GHÉP NỐI CỦA BÉ:\n\n" +
@@ -100,6 +122,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        supabaseClient.disconnect()
+        // Không ngắt kết nối supabaseClient tại đây vì UsageTrackingForegroundService
+        // cần duy trì kết nối WebSocket thời gian thực ngầm 24/7.
     }
 }
