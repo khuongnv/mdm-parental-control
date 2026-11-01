@@ -108,13 +108,20 @@
 - `[Modified]`: `target-node/app/src/main/java/com/mdm/parentalcontrol/child/updater/GitHubReleaseUpdater.kt` - Hoàn thiện auto-updater tải % và cài đặt
 - `[Modified]`: `target-node/app/src/main/java/com/mdm/parentalcontrol/child/ui/MainActivity.kt` - Viết lại toàn bộ UI Jetpack Compose
 - `[Modified]`: `admin-node/lib/services/mdm_supabase_service.dart` - Bổ sung broadcast PAIRING_SUCCESS
+- `[Created]`: `target-node/app/src/main/java/com/mdm/parentalcontrol/child/ui/components/QrCodeImage.kt` - Trình tạo mã QR Code động từ ZXing
 - `[Created]`: `release/vfam-child-1.2.4.apk` - Gói APK Release mới dung lượng 16.6 MB
 
 ---
 
 ## 4. Kiểm Thử & Nghiệm Thu (Verification)
-- `target-node assembleRelease`: Biên dịch thành công 100% trong 2m 45s, tạo ra APK Release `vfam-child-1.2.4.apk`.
+- `target-node assembleRelease`: Biên dịch thành công 100%, tạo ra APK Release `vfam-child-1.2.4.apk`.
 - `admin-node flutter analyze`: Hoàn toàn sạch lỗi (No issues found, 0 errors).
-- Giao diện đạt chuẩn Apple Music: Font chữ SF Pro Display nạp tĩnh trực tiếp, giao diện bo góc 16dp, Dark AMOLED và Light theme, badge trạng thái chuẩn chỉnh.
-- Logic pairing: Khi đã pair, nút tạo mã OTP bị ẩn hoàn toàn, chỉ hiển thị card thông tin bảo vệ.
-- Cơ chế update: Kiểm tra GitHub Releases API, so sánh semver và hỗ trợ tải với progress bar.
+- **Kiểm thử trực tiếp trên Samsung Galaxy S21 5G (SM-G991B)** qua ADB:
+  - Cài đặt thành công qua `adb install -r -d -t`.
+  - Khởi chạy và xác nhận thiết bị nhận diện trạng thái đã ghép nối thành công (`is_claimed = true`):
+    - Thẻ trạng thái hiển thị **"Đã Ghép Nối An Toàn"** kèm badge **"ĐANG BẢO VỆ"**.
+    - Hiển thị thanh tiến độ thời gian dùng trong ngày: `0m / 120m` và khung giờ đi ngủ `21:30 - 06:00`.
+    - **Nút tạo mã OTP đã hoàn toàn biến mất** theo đúng yêu cầu bài toán.
+  - Sửa lỗi hiển thị khối OTP: Giảm kích thước xuống 36dp x 36dp căn giữa, loại bỏ hoàn toàn tràn lề.
+  - Sửa lỗi nút "Kiểm tra" bị ngắt dòng chữ dọc bằng cách phân bổ `weight(1f)` cho cột Device ID.
+  - Tích hợp thành công tab **Mã QR Code** sử dụng ZXing render trực tiếp trên Jetpack Compose.
