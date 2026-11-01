@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-01 | [`2026-11-01_create_deploy_app_skill.md`](./2026-11-01_create_deploy_app_skill.md) | Tao skill deploy-app phuc vu phat hanh va cap nhat phien ban tung app qua GitHub Release | `lead-architect` | ðŸ„ Äang tiáº¿n hÃ nh |
 | 2026-11-01 | [`2026-11-01_github_release_auto_update.md`](./2026-11-01_github_release_auto_update.md) | Trien khai co che tu dong cap nhat phien ban qua GitHub Release cho ca 2 Mobile Apps | `lead-architect` | ðŸ„ Äang tiáº¿n hÃ nh |
 | 2026-11-01 | [`2026-11-01_pairing_and_usage_tracking_core.md`](./2026-11-01_pairing_and_usage_tracking_core.md) | Trien khai Pairing Flow (QR/OTP), SignalR Client va UsageStats Local Room Engine | `lead-architect` | ðŸ„ Äang tiáº¿n hÃ nh |
 | 2026-11-01 | [`2026-11-01_scaffold_three_tier_foundations.md`](./2026-11-01_scaffold_three_tier_foundations.md) | Khoi tao nen tang dong bo ca 3 node (Backend .NET 8, Target Node Android DO, Admin Node Compose) | `lead-architect` | ðŸ„ Äang tiáº¿n hÃ nh |
