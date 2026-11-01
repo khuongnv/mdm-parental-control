@@ -86,10 +86,12 @@ Write-Host "Creating git tag $tag" -ForegroundColor Cyan
 git tag -a $tag -m "$releaseTitle" -f
 git push origin $tag -f
 
-if (Get-Command gh -ErrorAction SilentlyContinue) {
+$ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+
+if ($ghExe) {
     Write-Host "Publishing GitHub Release via gh CLI..." -ForegroundColor Cyan
     $artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
-    $cmd = "gh release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
+    $cmd = "& `"$ghExe`" release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
     Invoke-Expression $cmd
     Write-Host "GitHub Release created successfully!" -ForegroundColor Green
 } else {

@@ -41,6 +41,72 @@ class AppleTheme {
   static const Color textSecondary = Color(0xFF8E8E93); // Gray93
 }
 
+/// Hệ Typography khớp 100% với Type.kt của dự án Android Music Player
+class AppleTypography {
+  static const String fontFamily = 'sans-serif';
+  static const List<String> fontFamilyFallback = ['sans-serif', 'sans-serif-medium', 'Roboto'];
+
+  static const TextStyle displayLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
+    fontSize: 34,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.37,
+    height: 41 / 34,
+    color: AppleTheme.textPrimary,
+  );
+
+  static const TextStyle headlineLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
+    fontSize: 22,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.35,
+    height: 28 / 22,
+    color: AppleTheme.textPrimary,
+  );
+
+  static const TextStyle titleLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
+    fontSize: 20,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.38,
+    height: 25 / 20,
+    color: AppleTheme.textPrimary,
+  );
+
+  static const TextStyle bodyLarge = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
+    fontSize: 17,
+    fontWeight: FontWeight.w400,
+    letterSpacing: -0.41,
+    height: 22 / 17,
+    color: AppleTheme.textPrimary,
+  );
+
+  static const TextStyle bodyMedium = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
+    fontSize: 15,
+    fontWeight: FontWeight.w400,
+    letterSpacing: -0.24,
+    height: 20 / 15,
+    color: AppleTheme.textSecondary,
+  );
+
+  static const TextStyle labelSmall = TextStyle(
+    fontFamily: fontFamily,
+    fontFamilyFallback: fontFamilyFallback,
+    fontSize: 12,
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0,
+    height: 16 / 12,
+    color: AppleTheme.textSecondary,
+  );
+}
+
 class MdmParentApp extends StatelessWidget {
   const MdmParentApp({super.key});
 
@@ -53,9 +119,17 @@ class MdmParentApp extends StatelessWidget {
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppleTheme.darkBackground,
-        // Để null để Flutter tự động kế thừa font hệ thống gốc của máy Android (One UI Sans, Honor Sans, etc.)
-        fontFamily: null,
+        fontFamily: AppleTypography.fontFamily,
+        fontFamilyFallback: AppleTypography.fontFamilyFallback,
         typography: Typography.material2021(platform: TargetPlatform.android),
+        textTheme: const TextTheme(
+          displayLarge: AppleTypography.displayLarge,
+          headlineLarge: AppleTypography.headlineLarge,
+          titleLarge: AppleTypography.titleLarge,
+          bodyLarge: AppleTypography.bodyLarge,
+          bodyMedium: AppleTypography.bodyMedium,
+          labelSmall: AppleTypography.labelSmall,
+        ),
         colorScheme: const ColorScheme.dark(
           primary: AppleTheme.appleRed,
           secondary: AppleTheme.appleBlue,
@@ -73,11 +147,7 @@ class MdmParentApp extends StatelessWidget {
           backgroundColor: AppleTheme.darkBackground,
           elevation: 0,
           scrolledUnderElevation: 0,
-          titleTextStyle: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: AppleTheme.textPrimary,
-          ),
+          titleTextStyle: AppleTypography.titleLarge,
         ),
         useMaterial3: true,
       ),
@@ -1315,7 +1385,7 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   final ParentAppUpdater _updater = ParentAppUpdater();
 
-  String currentVersion = '1.2.0';
+  String currentVersion = '1.2.1';
   bool isCheckingUpdate = false;
   double? downloadProgress;
 

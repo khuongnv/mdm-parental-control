@@ -32,13 +32,41 @@ class ParentAppUpdater {
     this.repoName = 'mdm-parental-control',
   });
 
+  /// So sánh Semantic Versioning (SemVer)
+  /// Chỉ trả về true nếu phiên bản remote lớn hơn phiên bản hiện tại
+  static bool isNewerVersion(String remoteTag, String currentVersion) {
+    final remoteNumbers = remoteTag
+        .replaceAll(RegExp(r'[^\d.]'), '')
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+    final localNumbers = currentVersion
+        .replaceAll(RegExp(r'[^\d.]'), '')
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+
+    if (remoteNumbers.isEmpty || localNumbers.isEmpty) return false;
+
+    final maxLen = remoteNumbers.length > localNumbers.length
+        ? remoteNumbers.length
+        : localNumbers.length;
+    for (int i = 0; i < maxLen; i++) {
+      final r = i < remoteNumbers.length ? remoteNumbers[i] : 0;
+      final l = i < localNumbers.length ? localNumbers[i] : 0;
+      if (r > l) return true;
+      if (r < l) return false;
+    }
+    return false;
+  }
+
   /// Lấy phiên bản app hiện tại từ hệ thống
   Future<String> getCurrentAppVersion() async {
     try {
       final version = await _channel.invokeMethod<String>('getAppVersion');
-      return version ?? '1.1.0';
+      return version ?? '1.2.0';
     } catch (_) {
-      return '1.1.0';
+      return '1.2.0';
     }
   }
 
@@ -84,11 +112,11 @@ class ParentAppUpdater {
           }
         }
 
-        // So sánh tag_name với phiên bản hiện tại
+        // So sánh tag_name với phiên bản hiện tại bằng SemVer
         final cleanTag = tagName.replaceAll('v', '').trim();
         final cleanCurrent = currentVersion.replaceAll('v', '').trim();
 
-        if (downloadUrl != null && cleanTag != cleanCurrent) {
+        if (downloadUrl != null && isNewerVersion(cleanTag, cleanCurrent)) {
           return GitHubReleaseInfo(
             tagName: tagName,
             title: name,
@@ -113,8 +141,14 @@ class ParentAppUpdater {
     final client = http.Client();
     final request = http.Request('GET', Uri.parse(downloadUrl));
     request.headers['User-Agent'] = 'VFam-Admin-Updater';
+    request.followRedirects = true;
+    request.maxRedirects = 5;
 
     final response = await client.send(request);
+    if (response.statusCode != 200) {
+      throw Exception('Lỗi máy chủ tải file: HTTP ${response.statusCode}');
+    }
+
     final totalBytes = response.contentLength ?? 0;
     int receivedBytes = 0;
 
@@ -150,8 +184,8 @@ class ParentAppUpdater {
         'filePath': apkFile.absolute.path,
       });
       return success ?? false;
-    } on PlatformException catch (e) {
-      throw Exception(e.message ?? 'Lỗi khởi động cài đặt ứng dụng');
+    } catch (e) {
+      rethrow;
     }
   }
 }
