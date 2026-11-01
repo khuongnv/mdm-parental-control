@@ -142,7 +142,7 @@ class MdmSupabaseClient @Inject constructor() {
      * Kiểm tra trạng thái đã được ghép nối hay chưa từ bảng pairing_sessions
      */
     fun checkPairingStatus(deviceId: String, onResult: (isClaimed: Boolean) -> Unit) {
-        val url = "$supabaseUrl/rest/v1/pairing_sessions?device_id=eq.$deviceId&select=is_claimed,expires_at&order=created_at.desc&limit=1"
+        val url = "$supabaseUrl/rest/v1/pairing_sessions?device_id=eq.$deviceId&is_claimed=eq.true&limit=1"
         val request = Request.Builder()
             .url(url)
             .addHeader("apikey", anonKey)
@@ -162,9 +162,7 @@ class MdmSupabaseClient @Inject constructor() {
                     try {
                         val array = JSONArray(body)
                         if (array.length() > 0) {
-                            val item = array.getJSONObject(0)
-                            val isClaimed = item.optBoolean("is_claimed", false)
-                            onResult(isClaimed)
+                            onResult(true)
                             return
                         }
                     } catch (e: Exception) {

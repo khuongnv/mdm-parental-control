@@ -1,12 +1,13 @@
 package com.mdm.parentalcontrol.child.ui
 
 import android.app.admin.DevicePolicyManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.animation.*
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -33,7 +35,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
+import com.mdm.parentalcontrol.child.data.local.DevicePolicyLocalEntity
 import com.mdm.parentalcontrol.child.data.local.DevicePreferences
+import com.mdm.parentalcontrol.child.data.local.UsageDao
 import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
 import com.mdm.parentalcontrol.child.ui.components.*
@@ -61,6 +65,9 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var releaseUpdater: GitHubReleaseUpdater
 
+    @Inject
+    lateinit var usageDao: UsageDao
+
     private val currentAppVersion = "1.2.4"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,16 +86,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 2. Kiểm tra trạng thái ghép nối ban đầu nếu đã có deviceId
-        val savedId = devicePreferences.deviceId
-        if (!savedId.isNullOrEmpty() && !devicePreferences.isPaired) {
-            supabaseClient.checkPairingStatus(savedId) { isClaimed ->
-                if (isClaimed) {
-                    devicePreferences.completePairing(savedId, devicePreferences.deviceName)
-                }
-            }
-        }
-
         setContent {
             ChildAppScreen()
         }
@@ -101,8 +98,11 @@ class MainActivity : AppCompatActivity() {
         var deviceId by remember { mutableStateOf(devicePreferences.deviceId) }
         var deviceName by remember { mutableStateOf(devicePreferences.deviceName ?: "${Build.MANUFACTURER} ${Build.MODEL}") }
         var otpCode by remember { mutableStateOf(devicePreferences.otpCode) }
-        var otpExpiresAt by remember { mutableStateOf<String?>(null) }
         var isGeneratingOtp by remember { mutableStateOf(false) }
+
+        // Dữ liệu giám sát thời lượng sử dụng hôm nay
+        var todayScreenTimeMinutes by remember { mutableStateOf(0) }
+        var currentPolicy by remember { mutableStateOf(DevicePolicyLocalEntity()) }
 
         // Trạng thái kiểm tra & cập nhật phiên bản
         var isCheckingUpdate by remember { mutableStateOf(false) }
@@ -117,7 +117,45 @@ class MainActivity : AppCompatActivity() {
 
         val context = LocalContext.current
         val dpm = remember { context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager }
-        val isDeviceOwner = remember { dpm.isDeviceOwnerApp(context.packageName) }
+        var isDeviceOwner by remember { mutableStateOf(dpm.isDeviceOwnerApp(context.packageName)) }
+
+        val todayDate = remember {
+            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        }
+
+        // Tự động kiểm tra trạng thái pairing và nạp thống kê sử dụng
+        fun refreshAllStatus() {
+            isDeviceOwner = dpm.isDeviceOwnerApp(context.packageName)
+            val currentId = devicePreferences.deviceId
+            deviceId = currentId
+
+            // Nạp thống kê từ Room Database
+            lifecycleScope.launch(Dispatchers.IO) {
+                val totalMs = usageDao.getTotalScreenTimeMs(todayDate) ?: 0L
+                val policy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+                withContext(Dispatchers.Main) {
+                    todayScreenTimeMinutes = (totalMs / (1000 * 60)).toInt()
+                    currentPolicy = policy
+                }
+            }
+
+            // Kiểm tra trạng thái đã ghép nối trên Supabase
+            if (!currentId.isNullOrEmpty()) {
+                supabaseClient.checkPairingStatus(currentId) { isClaimed ->
+                    if (isClaimed) {
+                        devicePreferences.completePairing(currentId, deviceName)
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            isPaired = true
+                            otpCode = null
+                        }
+                    }
+                }
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            refreshAllStatus()
+        }
 
         // Lắng nghe kết nối Supabase Realtime
         LaunchedEffect(deviceId) {
@@ -142,6 +180,7 @@ class MainActivity : AppCompatActivity() {
                     onExtraTime = { mins ->
                         toastMessage = "🎁 Ba mẹ đã thưởng thêm $mins phút sử dụng!"
                         toastSuccess = true
+                        refreshAllStatus()
                     },
                     onPairingSuccess = {
                         lifecycleScope.launch(Dispatchers.Main) {
@@ -150,6 +189,7 @@ class MainActivity : AppCompatActivity() {
                             otpCode = null
                             toastMessage = "✨ Ghép nối thành công với Phụ huynh!"
                             toastSuccess = true
+                            refreshAllStatus()
                         }
                     }
                 )
@@ -172,21 +212,22 @@ class MainActivity : AppCompatActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
+                        .navigationBarsPadding()
                 ) {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 80.dp)
+                        contentPadding = PaddingValues(bottom = 120.dp)
                     ) {
                         // Header Large Title (Phong cách Apple Music)
                         item {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp),
+                                    .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "VFam Child",
                                         style = MaterialTheme.typography.displayLarge.copy(
@@ -205,21 +246,47 @@ class MainActivity : AppCompatActivity() {
                                     )
                                 }
 
-                                // Nút chuyển đổi Theme Dark/Light
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .clickable { isDarkMode = !isDarkMode },
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                        contentDescription = "Chuyển Theme",
-                                        tint = if (isDarkMode) AppleOrange else AppleBlue,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    // Nút làm mới trạng thái
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .clickable {
+                                                refreshAllStatus()
+                                                toastMessage = "🔄 Đã làm mới trạng thái thiết bị!"
+                                                toastSuccess = true
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Làm mới",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    // Nút chuyển đổi Theme Dark/Light
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .clickable { isDarkMode = !isDarkMode },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                            contentDescription = "Chuyển Theme",
+                                            tint = if (isDarkMode) AppleOrange else AppleBlue,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -280,10 +347,80 @@ class MainActivity : AppCompatActivity() {
                                         thickness = 0.5.dp
                                     )
 
+                                    // Thống kê thời gian sử dụng trong ngày
+                                    val limitMins = currentPolicy.dailyLimitMinutes
+                                    val progress = if (limitMins > 0) (todayScreenTimeMinutes.toFloat() / limitMins).coerceIn(0f, 1f) else 0f
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                            .padding(14.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Thời gian dùng hôm nay",
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontSize = 14.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "${todayScreenTimeMinutes}m / ${limitMins}m",
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 15.sp
+                                                ),
+                                                color = if (progress >= 1f) AppleRed else AppleEmerald
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        LinearProgressIndicator(
+                                            progress = { progress },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(8.dp)
+                                                .clip(RoundedCornerShape(4.dp)),
+                                            color = if (progress >= 1f) AppleRed else AppleEmerald,
+                                            trackColor = MaterialTheme.colorScheme.surface
+                                        )
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Giờ đi ngủ: ${currentPolicy.bedtimeStart} - ${currentPolicy.bedtimeEnd}",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                                                color = Gray93
+                                            )
+                                            Text(
+                                                text = if (currentPolicy.isEmergencyLockdown) "🚨 Đang khóa" else "Khả dụng",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 12.sp
+                                                ),
+                                                color = if (currentPolicy.isEmergencyLockdown) AppleRed else AppleEmerald
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
                                     SettingsItemRow(
                                         icon = Icons.Default.PhoneAndroid,
                                         iconBackground = AppleBlue,
-                                        title = "Tên máy",
+                                        title = "Tên thiết bị",
                                         subtitle = deviceName
                                     )
 
@@ -346,7 +483,70 @@ class MainActivity : AppCompatActivity() {
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(16.dp))
+                                    // Nếu đã có cấu hình thiết bị trước đó nhưng chưa đánh dấu claimed
+                                    if (!deviceId.isNullOrEmpty()) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = "Mã thiết bị (Device ID):",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                                    color = Gray93
+                                                )
+                                                Text(
+                                                    text = deviceId!!,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontWeight = FontWeight.Medium,
+                                                        fontSize = 11.sp
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    toastMessage = "Đang kiểm tra ghép nối trên máy chủ..."
+                                                    toastSuccess = true
+                                                    supabaseClient.checkPairingStatus(deviceId!!) { isClaimed ->
+                                                        if (isClaimed) {
+                                                            devicePreferences.completePairing(deviceId!!, deviceName)
+                                                            lifecycleScope.launch(Dispatchers.Main) {
+                                                                isPaired = true
+                                                                otpCode = null
+                                                                toastMessage = "✨ Đã xác nhận ghép nối thành công!"
+                                                                toastSuccess = true
+                                                            }
+                                                        } else {
+                                                            lifecycleScope.launch(Dispatchers.Main) {
+                                                                toastMessage = "Mã OTP chưa được Phụ huynh nhập."
+                                                                toastSuccess = false
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Kiểm tra",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp
+                                                    ),
+                                                    color = AppleEmerald
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
 
                                     if (otpCode != null) {
                                         // Khối hiển thị mã OTP nổi bật kiểu Apple
@@ -368,7 +568,7 @@ class MainActivity : AppCompatActivity() {
                                                 color = AppleEmerald
                                             )
 
-                                            Spacer(modifier = Modifier.height(10.dp))
+                                            Spacer(modifier = Modifier.height(12.dp))
 
                                             // Hiển thị từng ký tự OTP trong các ô vuông cách điệu
                                             Row(
@@ -431,7 +631,7 @@ class MainActivity : AppCompatActivity() {
                                         Spacer(modifier = Modifier.height(14.dp))
                                     }
 
-                                    // Nút tạo mã kết nối
+                                    // Nút tạo mã kết nối - Được thiết kế vừa vặn 1 dòng không bị cắt chữ
                                     Button(
                                         onClick = {
                                             isGeneratingOtp = true
@@ -450,7 +650,6 @@ class MainActivity : AppCompatActivity() {
                                                     lifecycleScope.launch(Dispatchers.Main) {
                                                         deviceId = result.deviceId
                                                         otpCode = result.otpCode
-                                                        otpExpiresAt = result.expiresAt
                                                         isGeneratingOtp = false
                                                         toastMessage = "✨ Đã tạo mã OTP mới thành công!"
                                                         toastSuccess = true
@@ -467,11 +666,12 @@ class MainActivity : AppCompatActivity() {
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(50.dp),
+                                            .defaultMinSize(minHeight = 52.dp),
                                         shape = RoundedCornerShape(14.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = AppleEmerald
                                         ),
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
                                         enabled = !isGeneratingOtp
                                     ) {
                                         if (isGeneratingOtp) {
@@ -484,9 +684,11 @@ class MainActivity : AppCompatActivity() {
                                             Text(
                                                 text = "Đang kết nối Supabase...",
                                                 style = MaterialTheme.typography.bodyLarge.copy(
-                                                    fontWeight = FontWeight.SemiBold
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 15.sp
                                                 ),
-                                                color = Color.White
+                                                color = Color.White,
+                                                maxLines = 1
                                             )
                                         } else {
                                             Icon(
@@ -495,14 +697,15 @@ class MainActivity : AppCompatActivity() {
                                                 tint = Color.White,
                                                 modifier = Modifier.size(20.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = if (otpCode != null) "Tạo Lại Mã OTP Khác" else "✨ Tạo Mã Ghép Nối Với Phụ Huynh (OTP)",
+                                                text = if (otpCode != null) "Tạo Lại Mã OTP Khác" else "Tạo Mã Ghép Nối (OTP)",
                                                 style = MaterialTheme.typography.bodyLarge.copy(
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontSize = 15.sp
                                                 ),
-                                                color = Color.White
+                                                color = Color.White,
+                                                maxLines = 1
                                             )
                                         }
                                     }
@@ -530,6 +733,60 @@ class MainActivity : AppCompatActivity() {
                                         )
                                     }
                                 )
+
+                                // Hiển thị lệnh ADB kèm nút sao chép nếu chưa cấp Device Owner
+                                if (!isDeviceOwner) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    val adbCommand = "adb shell dpm set-device-owner ${context.packageName}/${MdmDeviceAdminReceiver::class.java.canonicalName}"
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        border = androidx.compose.foundation.BorderStroke(0.5.dp, GrayBorder),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "LỆNH KÍCH HOẠT ADB:",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 11.sp,
+                                                        letterSpacing = 0.5.sp
+                                                    ),
+                                                    color = AppleOrange
+                                                )
+                                                Text(
+                                                    text = "Sao chép lệnh",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 12.sp
+                                                    ),
+                                                    color = AppleBlue,
+                                                    modifier = Modifier.clickable {
+                                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                        clipboard.setPrimaryClip(ClipData.newPlainText("ADB Command", adbCommand))
+                                                        toastMessage = "📋 Đã sao chép lệnh ADB vào bộ nhớ tạm!"
+                                                        toastSuccess = true
+                                                    }
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = adbCommand,
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 11.sp,
+                                                    lineHeight = 16.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
 
                                 HorizontalDivider(
                                     modifier = Modifier.padding(vertical = 12.dp),
@@ -612,11 +869,12 @@ class MainActivity : AppCompatActivity() {
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(48.dp),
+                                        .defaultMinSize(minHeight = 48.dp),
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                                     ),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                                     enabled = !isCheckingUpdate
                                 ) {
                                     if (isCheckingUpdate) {
