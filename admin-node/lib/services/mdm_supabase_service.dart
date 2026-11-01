@@ -35,11 +35,21 @@ class MdmSupabaseService {
     if (current != null) {
       return current.id;
     }
-    final authResponse = await client.auth.signInAnonymously();
-    if (authResponse.user == null) {
-      throw Exception('Không thể tạo phiên xác thực phụ huynh');
+    try {
+      final authResponse = await client.auth.signInAnonymously();
+      if (authResponse.user == null) {
+        throw Exception('Không thể tạo phiên xác thực phụ huynh');
+      }
+      return authResponse.user!.id;
+    } on AuthApiException catch (e) {
+      if (e.code == 'anonymous_provider_disabled' || e.statusCode == '422') {
+        throw Exception(
+          'Dự án Supabase chưa bật tính năng "Anonymous sign-ins".\n'
+          'Vui lòng truy cập Supabase Dashboard -> Authentication -> Providers -> Anonymous và bật "Enable".'
+        );
+      }
+      rethrow;
     }
-    return authResponse.user!.id;
   }
 
   /// Lấy hoặc tạo Family mặc định cho phụ huynh

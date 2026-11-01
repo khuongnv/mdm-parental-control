@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-01 | [`2026-11-01_resolve_supabase_anonymous_auth.md`](./2026-11-01_resolve_supabase_anonymous_auth.md) | Khắc phục lỗi cấu hình Anonymous Sign-ins trên Supabase Cloud cho app VFam Admin | `lead-architect`, `backend-sync-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_fix_admin_app_crash.md`](./2026-11-01_fix_admin_app_crash.md) | Điều tra và khắc phục triệt để lỗi crash khởi chạy của ứng dụng VFam Admin (`admin-node`) | `lead-architect`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_release_v1.1.0_and_deployment_guide.md`](./2026-11-01_release_v1.1.0_and_deployment_guide.md) | Phát hành bản Release v1.1.0 & Soạn thảo Hướng dẫn triển khai thực tế | `lead-architect`, `qa-security-perf-specialist`, `parent-ui-specialist`, `device-owner-specialist` | ✅ Hoàn thành |
 | 2026-11-01 | [`2026-11-01_implement_branding_and_app_icons.md`](./2026-11-01_implement_branding_and_app_icons.md) | Tích hợp Nhận diện thương hiệu & App Icon Family Shield (VFam) cho 2 ứng dụng | `lead-architect`, `parent-ui-specialist`, `device-owner-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
