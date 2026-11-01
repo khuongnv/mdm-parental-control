@@ -20,14 +20,16 @@ void main() async {
 class AppleTheme {
   // Nền đen sâu chuẩn AMOLED
   static const Color darkBackground = Color(0xFF000000);
-  // Nền card/bề mặt phụ (tương đương iOS .secondarySystemBackground)
-  static const Color darkSurface = Color(0xFF1C1C1E);
-  // Nền elevated / item hover (tương đương iOS .tertiarySystemBackground)
+  // Nền Liquid Glass Card bán trong suốt cao cấp
+  static const Color glassSurface = Color(0xEE1E1E22);
+  // Nền surface phụ / item hover
   static const Color darkSurfaceElevated = Color(0xFF2C2C2E);
+  // Đường viền sáng bạc Liquid Glass (Luminous silver rim)
+  static const Color glassBorder = Color(0x33FFFFFF);
   // Đường kẻ viền siêu mảnh (Hairline Divider)
   static const Color hairlineDivider = Color(0xFF38383A);
 
-  // Bảng màu Accent Apple
+  // Bảng màu Accent Apple Music
   static const Color appleRed = Color(0xFFFA2D55); // Apple Music Red
   static const Color appleBlue = Color(0xFF007AFF); // iOS System Blue
   static const Color appleGreen = Color(0xFF34C759); // iOS System Green
@@ -36,7 +38,7 @@ class AppleTheme {
 
   // Màu văn bản phân cấp
   static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFF8E8E93); // iOS System Gray (Gray93)
+  static const Color textSecondary = Color(0xFF8E8E93); // Gray93
 }
 
 class MdmParentApp extends StatelessWidget {
@@ -51,25 +53,20 @@ class MdmParentApp extends StatelessWidget {
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppleTheme.darkBackground,
-        // Sử dụng 100% font hệ thống của chính máy Android (Samsung One UI Sans, Honor Sans, Roboto...)
-        fontFamily: 'sans-serif',
-        fontFamilyFallback: const [
-          'sans-serif',
-          'sans-serif-medium',
-          'Roboto',
-        ],
+        // Để null để Flutter tự động kế thừa font hệ thống gốc của máy Android (One UI Sans, Honor Sans, etc.)
+        fontFamily: null,
         typography: Typography.material2021(platform: TargetPlatform.android),
         colorScheme: const ColorScheme.dark(
           primary: AppleTheme.appleRed,
           secondary: AppleTheme.appleBlue,
-          surface: AppleTheme.darkSurface,
+          surface: AppleTheme.glassSurface,
         ),
         cardTheme: CardThemeData(
-          color: AppleTheme.darkSurface,
+          color: AppleTheme.glassSurface,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: AppleTheme.hairlineDivider, width: 0.5),
+            borderRadius: BorderRadius.circular(22),
+            side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
           ),
         ),
         appBarTheme: const AppBarTheme(
@@ -77,7 +74,6 @@ class MdmParentApp extends StatelessWidget {
           elevation: 0,
           scrolledUnderElevation: 0,
           titleTextStyle: TextStyle(
-            fontFamily: 'sans-serif',
             fontSize: 20,
             fontWeight: FontWeight.w700,
             color: AppleTheme.textPrimary,
@@ -107,6 +103,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppleTheme.darkBackground,
+      // Cho phép nội dung cuộn bên dưới thanh điều hướng nổi
+      extendBody: true,
       body: IndexedStack(
         index: _currentIndex,
         children: [
@@ -118,25 +116,37 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           const SettingsTab(),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: AppleTheme.darkSurface,
-          border: Border(
-            top: BorderSide(color: AppleTheme.hairlineDivider, width: 0.5),
-          ),
-        ),
-        child: SafeArea(
-          child: SizedBox(
-            height: 60,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildNavItem(0, Icons.shield_rounded, Icons.shield_outlined, 'Giám Sát'),
-                _buildNavItem(1, Icons.history_rounded, Icons.history_outlined, 'Lịch Sử'),
-                _buildNavItem(2, Icons.tune_rounded, Icons.tune_outlined, 'Cài Đặt'),
-              ],
+      bottomNavigationBar: _buildFloatingBottomNavBar(),
+    );
+  }
+
+  /// Thanh điều hướng nổi Liquid Glass chuẩn Apple Music
+  Widget _buildFloatingBottomNavBar() {
+    return SafeArea(
+      top: false,
+      bottom: true,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppleTheme.glassSurface,
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
             ),
-          ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildNavItem(0, Icons.shield_rounded, Icons.shield_outlined, 'Giám Sát'),
+            _buildNavItem(1, Icons.auto_awesome_rounded, Icons.auto_awesome_outlined, 'Lịch Sử'),
+            _buildNavItem(2, Icons.settings_rounded, Icons.settings_outlined, 'Cài Đặt'),
+          ],
         ),
       ),
     );
@@ -144,34 +154,46 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   Widget _buildNavItem(int index, IconData activeIcon, IconData inactiveIcon, String label) {
     final isSelected = _currentIndex == index;
-    return InkWell(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        setState(() => _currentIndex = index);
-        if (index == 1) _historyKey.currentState?.refresh();
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isSelected ? activeIcon : inactiveIcon,
-              color: isSelected ? AppleTheme.appleRed : AppleTheme.textSecondary,
-              size: 24,
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _currentIndex = index);
+          if (index == 1) _historyKey.currentState?.refresh();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isSelected ? AppleTheme.appleRed.withValues(alpha: 0.14) : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isSelected ? AppleTheme.appleRed.withValues(alpha: 0.28) : Colors.transparent,
+              width: 0.5,
             ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'sans-serif',
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isSelected ? activeIcon : inactiveIcon,
                 color: isSelected ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                size: 22,
               ),
-            ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -252,10 +274,10 @@ class _DashboardTabState extends State<DashboardTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppleTheme.darkSurface,
+        backgroundColor: AppleTheme.glassSurface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: AppleTheme.hairlineDivider, width: 0.5),
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
         ),
         title: const Text('Ghép Nối Thiết Bị Con', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
         content: Column(
@@ -273,7 +295,6 @@ class _DashboardTabState extends State<DashboardTab> {
               maxLength: 6,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                fontFamily: 'sans-serif',
                 fontSize: 28,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 8,
@@ -329,7 +350,7 @@ class _DashboardTabState extends State<DashboardTab> {
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(backgroundColor: Colors.red.shade900, content: Text('Lỗi: $e')),
+                    SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi: $e')),
                   );
                 }
               }
@@ -354,7 +375,7 @@ class _DashboardTabState extends State<DashboardTab> {
       await _supabaseService.triggerPanicLockdown(deviceId, targetLock);
       await ActivityHistoryService.logActivity(
         type: targetLock ? ActivityType.lock : ActivityType.unlock,
-        title: targetLock ? 'Khóa Khẩn Cấp Thiết Bị' : 'Mở Khóa Thiết Bị',
+        title: targetLock ? 'Khóa Khẩn Cấp' : 'Mở Khóa Thiết Bị',
         subtitle: targetLock ? 'Đã gửi lệnh khóa màn hình tức thì tới $deviceName' : 'Đã gỡ khóa cho $deviceName',
       );
       widget.onActionLogged();
@@ -372,7 +393,7 @@ class _DashboardTabState extends State<DashboardTab> {
       if (mounted) {
         setState(() => isEmergencyLocked = !targetLock);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: Colors.red.shade900, content: Text('Lỗi gửi lệnh: $e')),
+          SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi gửi lệnh: $e')),
         );
       }
     }
@@ -411,7 +432,7 @@ class _DashboardTabState extends State<DashboardTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: Colors.red.shade900, content: Text('Lỗi cộng giờ: $e')),
+          SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi cộng giờ: $e')),
         );
       }
     }
@@ -422,11 +443,12 @@ class _DashboardTabState extends State<DashboardTab> {
     return Scaffold(
       backgroundColor: AppleTheme.darkBackground,
       body: SafeArea(
+        bottom: false,
         child: isLoading
             ? const Center(child: CircularProgressIndicator(color: AppleTheme.appleRed))
             : RefreshIndicator(
                 color: AppleTheme.appleRed,
-                backgroundColor: AppleTheme.darkSurface,
+                backgroundColor: AppleTheme.glassSurface,
                 onRefresh: _loadDeviceData,
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -434,30 +456,13 @@ class _DashboardTabState extends State<DashboardTab> {
                   children: [
                     const SizedBox(height: 12),
 
-                    // Header chuẩn Apple Large Title
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        const Text(
-                          'Giám Sát',
-                          style: TextStyle(
-                            fontFamily: 'sans-serif',
-                            fontSize: 34,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.5,
-                            color: AppleTheme.textPrimary,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            _buildCircleButton(Icons.refresh_rounded, _loadDeviceData),
-                            const SizedBox(width: 8),
-                            _buildCircleButton(Icons.add_link_rounded, _showPairingDialog, isAccent: true),
-                          ],
-                        ),
-                      ],
-                    ),
+                    // 1. Header chuẩn Apple Music Large Title & Subtitle
+                    _buildHeader(),
+
+                    const SizedBox(height: 14),
+
+                    // 2. Signature 3-Card Quick Stats Grid (Apple Music Style)
+                    _buildQuickStatsGrid(),
 
                     const SizedBox(height: 20),
 
@@ -466,26 +471,163 @@ class _DashboardTabState extends State<DashboardTab> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Section 1: Thẻ Thiết Bị Con
+                    // 3. Section 1: Thẻ Thiết Bị Con Đang Kết Nối
                     _buildSectionHeader('THIẾT BỊ CON ĐANG KẾT NỐI'),
                     _buildDeviceGroupCard(),
 
                     const SizedBox(height: 22),
 
-                    // Section 2: Thời Gian & Hạn Mức
+                    // 4. Section 2: Hạn Mức Sử Dụng Hôm Nay
                     _buildSectionHeader('HẠN MỨC SỬ DỤNG HÔM NAY'),
                     _buildQuotaGroupCard(),
 
                     const SizedBox(height: 22),
 
-                    // Section 3: Điều Khiển Thiết Bị (Khóa khẩn cấp & Thưởng giờ)
+                    // 5. Section 3: Điều Khiển Tức Thì
                     _buildSectionHeader('ĐIỀU KHIỂN THỜI GIAN THỰC'),
                     _buildControlGroupCard(),
 
-                    const SizedBox(height: 32),
+                    // Khoảng đệm để không bị Bottom Bar nổi che khuất
+                    const SizedBox(height: 110),
                   ],
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Text(
+              'Giám Sát',
+              style: TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.5,
+                color: AppleTheme.textPrimary,
+              ),
+            ),
+            Row(
+              children: [
+                _buildCircleButton(Icons.refresh_rounded, _loadDeviceData),
+                const SizedBox(width: 8),
+                _buildCircleButton(Icons.add_link_rounded, _showPairingDialog, isAccent: true),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'Quản lý thời gian thực và bảo vệ thiết bị con',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w400,
+            color: AppleTheme.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Hàng 3 thẻ thống kê nhanh (Signature Quick Stats Pills từ Apple Music)
+  Widget _buildQuickStatsGrid() {
+    final hasDevice = activeDevice != null;
+    final totalAllowedMins = 120 + extraTimeMinutes;
+
+    return Row(
+      children: [
+        // Pill 1: Thiết bị & Kết nối
+        Expanded(
+          child: _buildStatPill(
+            icon: Icons.phone_android_rounded,
+            iconColor: AppleTheme.appleRed,
+            value: hasDevice ? '1 Máy' : '0 Máy',
+            label: isOnline ? 'Trực tuyến' : 'Ngoại tuyến',
+            onClick: _loadDeviceData,
+          ),
+        ),
+        const SizedBox(width: 10),
+        // Pill 2: Hạn mức hôm nay
+        Expanded(
+          child: _buildStatPill(
+            icon: Icons.timer_outlined,
+            iconColor: AppleTheme.appleAmber,
+            value: '${totalAllowedMins ~/ 60}h ${totalAllowedMins % 60}m',
+            label: 'Hạn mức',
+            onClick: () {},
+          ),
+        ),
+        const SizedBox(width: 10),
+        // Pill 3: Trạng thái khóa
+        Expanded(
+          child: _buildStatPill(
+            icon: Icons.shield_rounded,
+            iconColor: isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.appleGreen,
+            value: isEmergencyLocked ? 'ĐANG KHÓA' : 'An Toàn',
+            label: 'Trạng thái',
+            onClick: () {},
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatPill({
+    required IconData icon,
+    required Color iconColor,
+    required String value,
+    required String label,
+    required VoidCallback onClick,
+  }) {
+    return InkWell(
+      onTap: onClick,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: AppleTheme.glassSurface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: iconColor, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppleTheme.textPrimary,
+              ),
+            ),
+            Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w400,
+                color: AppleTheme.textSecondary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -496,7 +638,6 @@ class _DashboardTabState extends State<DashboardTab> {
       child: Text(
         title,
         style: const TextStyle(
-          fontFamily: 'sans-serif',
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppleTheme.textSecondary,
@@ -516,6 +657,10 @@ class _DashboardTabState extends State<DashboardTab> {
         decoration: BoxDecoration(
           color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.15) : AppleTheme.darkSurfaceElevated,
           shape: BoxShape.circle,
+          border: Border.all(
+            color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.3) : AppleTheme.glassBorder,
+            width: 0.5,
+          ),
         ),
         child: Icon(
           icon,
@@ -531,7 +676,7 @@ class _DashboardTabState extends State<DashboardTab> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF2C0B0E),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.red.shade800, width: 0.5),
       ),
       child: Row(
@@ -541,7 +686,7 @@ class _DashboardTabState extends State<DashboardTab> {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(fontFamily: 'sans-serif', color: Colors.white, fontSize: 13, height: 1.3),
+              style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3),
             ),
           ),
         ],
@@ -558,9 +703,9 @@ class _DashboardTabState extends State<DashboardTab> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppleTheme.darkSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppleTheme.hairlineDivider, width: 0.5),
+        color: AppleTheme.glassSurface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
       ),
       child: Row(
         children: [
@@ -571,7 +716,7 @@ class _DashboardTabState extends State<DashboardTab> {
               color: isEmergencyLocked
                   ? AppleTheme.appleRed.withValues(alpha: 0.15)
                   : (isOnline ? AppleTheme.appleGreen.withValues(alpha: 0.15) : AppleTheme.darkSurfaceElevated),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
               isEmergencyLocked ? Icons.lock_rounded : Icons.phone_android_rounded,
@@ -590,8 +735,7 @@ class _DashboardTabState extends State<DashboardTab> {
                       child: Text(
                         deviceName,
                         style: const TextStyle(
-                          fontFamily: 'sans-serif',
-                          fontSize: 17,
+                          fontSize: 16,
                           fontWeight: FontWeight.w600,
                           color: AppleTheme.textPrimary,
                         ),
@@ -613,7 +757,6 @@ class _DashboardTabState extends State<DashboardTab> {
                 Text(
                   hasDevice ? '$model • $osVersion' : model,
                   style: const TextStyle(
-                    fontFamily: 'sans-serif',
                     fontSize: 13,
                     color: AppleTheme.textSecondary,
                   ),
@@ -643,9 +786,9 @@ class _DashboardTabState extends State<DashboardTab> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppleTheme.darkSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppleTheme.hairlineDivider, width: 0.5),
+        color: AppleTheme.glassSurface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -656,8 +799,7 @@ class _DashboardTabState extends State<DashboardTab> {
               Text(
                 '${totalAllowedMins ~/ 60}h ${totalAllowedMins % 60}m Cho Phép',
                 style: const TextStyle(
-                  fontFamily: 'sans-serif',
-                  fontSize: 28,
+                  fontSize: 26,
                   fontWeight: FontWeight.w700,
                   letterSpacing: -0.5,
                   color: AppleTheme.textPrimary,
@@ -669,11 +811,11 @@ class _DashboardTabState extends State<DashboardTab> {
                   decoration: BoxDecoration(
                     color: AppleTheme.appleBlue.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppleTheme.appleBlue.withValues(alpha: 0.3), width: 0.5),
                   ),
                   child: Text(
                     '+$extraTimeMinutes phút',
                     style: const TextStyle(
-                      fontFamily: 'sans-serif',
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: AppleTheme.appleBlue,
@@ -687,7 +829,7 @@ class _DashboardTabState extends State<DashboardTab> {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: isEmergencyLocked ? 1.0 : 0.35,
-              minHeight: 6,
+              minHeight: 7,
               backgroundColor: AppleTheme.darkSurfaceElevated,
               valueColor: AlwaysStoppedAnimation<Color>(
                 isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.appleAmber,
@@ -700,7 +842,6 @@ class _DashboardTabState extends State<DashboardTab> {
                 ? '🚨 Thiết bị đang ở trạng thái Khóa Khẩn Cấp tầng hệ điều hành.'
                 : '🛡️ Thiết bị đang trong khung giờ an toàn và được quản lý bảo vệ.',
             style: TextStyle(
-              fontFamily: 'sans-serif',
               fontSize: 13,
               color: isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.textSecondary,
               fontWeight: isEmergencyLocked ? FontWeight.w600 : FontWeight.w400,
@@ -714,15 +855,15 @@ class _DashboardTabState extends State<DashboardTab> {
   Widget _buildControlGroupCard() {
     return Container(
       decoration: BoxDecoration(
-        color: AppleTheme.darkSurface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppleTheme.hairlineDivider, width: 0.5),
+        color: AppleTheme.glassSurface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
       ),
       child: Column(
         children: [
           // Mục 1: Khóa Khẩn Cấp với iOS Style Toggle Switch
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
               children: [
                 _buildSmallIconBox(Icons.lock_rounded, AppleTheme.appleRed),
@@ -732,13 +873,13 @@ class _DashboardTabState extends State<DashboardTab> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Khóa khẩn cấp thiết bị con',
-                        style: TextStyle(fontFamily: 'sans-serif', fontSize: 16, fontWeight: FontWeight.w600, color: AppleTheme.textPrimary),
+                        'Khóa khẩn cấp',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppleTheme.textPrimary),
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Tắt màn hình và chặn mở ứng dụng ngay lập tức',
-                        style: TextStyle(fontFamily: 'sans-serif', fontSize: 13, color: AppleTheme.textSecondary),
+                        'Tắt màn hình & chặn mọi app ngay',
+                        style: TextStyle(fontSize: 13, color: AppleTheme.textSecondary),
                       ),
                     ],
                   ),
@@ -768,13 +909,13 @@ class _DashboardTabState extends State<DashboardTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Cấp thêm thời gian',
-                          style: TextStyle(fontFamily: 'sans-serif', fontSize: 16, fontWeight: FontWeight.w600, color: AppleTheme.textPrimary),
+                          'Thưởng thêm thời gian',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppleTheme.textPrimary),
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Thưởng thêm giờ sử dụng cho con',
-                          style: TextStyle(fontFamily: 'sans-serif', fontSize: 13, color: AppleTheme.textSecondary),
+                          'Cộng thêm giờ sử dụng cho con',
+                          style: TextStyle(fontSize: 13, color: AppleTheme.textSecondary),
                         ),
                       ],
                     ),
@@ -800,11 +941,11 @@ class _DashboardTabState extends State<DashboardTab> {
 
   Widget _buildSmallIconBox(IconData icon, Color color) {
     return Container(
-      width: 32,
-      height: 32,
+      width: 34,
+      height: 34,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Icon(icon, color: Colors.white, size: 18),
     );
@@ -813,18 +954,18 @@ class _DashboardTabState extends State<DashboardTab> {
   Widget _buildTimeChip(String label, int minutes) {
     return InkWell(
       onTap: () => _grantExtraTime(minutes),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           color: AppleTheme.darkSurfaceElevated,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppleTheme.glassBorder, width: 0.5),
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: const TextStyle(
-            fontFamily: 'sans-serif',
             fontSize: 13,
             fontWeight: FontWeight.w600,
             color: AppleTheme.textPrimary,
@@ -877,77 +1018,170 @@ class _HistoryTabState extends State<HistoryTab> {
     return Scaffold(
       backgroundColor: AppleTheme.darkBackground,
       body: SafeArea(
+        bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header Large Title & Subtitle
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Lịch Sử',
-                    style: TextStyle(
-                      fontFamily: 'sans-serif',
-                      fontSize: 34,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.5,
-                      color: AppleTheme.textPrimary,
-                    ),
-                  ),
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, color: AppleTheme.textSecondary, size: 22),
-                        tooltip: 'Xóa lịch sử',
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              backgroundColor: AppleTheme.darkSurface,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                              title: const Text('Xóa lịch sử?'),
-                              content: const Text('Toàn bộ nhật ký gửi lệnh sẽ được làm sạch.', style: TextStyle(color: AppleTheme.textSecondary)),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy', style: TextStyle(color: AppleTheme.textSecondary))),
-                                FilledButton(
-                                  style: FilledButton.styleFrom(backgroundColor: AppleTheme.appleRed),
-                                  onPressed: () {
-                                    Navigator.pop(ctx);
-                                    _clearHistory();
-                                  },
-                                  child: const Text('Xóa'),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                      const Text(
+                        'Lịch Sử',
+                        style: TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
+                          color: AppleTheme.textPrimary,
+                        ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.refresh_rounded, color: AppleTheme.textSecondary, size: 22),
-                        onPressed: refresh,
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded, color: AppleTheme.textSecondary, size: 22),
+                            tooltip: 'Xóa lịch sử',
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: AppleTheme.glassSurface,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(22),
+                                    side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
+                                  ),
+                                  title: const Text('Xóa lịch sử?'),
+                                  content: const Text('Toàn bộ nhật ký gửi lệnh sẽ được làm sạch.', style: TextStyle(color: AppleTheme.textSecondary)),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy', style: TextStyle(color: AppleTheme.textSecondary))),
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(backgroundColor: AppleTheme.appleRed),
+                                      onPressed: () {
+                                        Navigator.pop(ctx);
+                                        _clearHistory();
+                                      },
+                                      child: const Text('Xóa'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.refresh_rounded, color: AppleTheme.textSecondary, size: 22),
+                            onPressed: refresh,
+                          ),
+                        ],
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Dòng thời gian tương tác và điều khiển thiết bị',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
+                      color: AppleTheme.textSecondary,
+                    ),
                   ),
                 ],
               ),
             ),
+
+            // Thẻ tóm lược Liquid Glass (Tương tự thẻ Ký Ức trong Apple Music)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppleTheme.glassSurface,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AppleTheme.appleRed.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.auto_awesome_rounded, color: AppleTheme.appleRed, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Tổng số tương tác',
+                            style: TextStyle(fontSize: 13, color: AppleTheme.textSecondary),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${_activities.length} sự kiện',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              color: AppleTheme.appleRed,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppleTheme.appleRed.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        'Thời gian thực',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppleTheme.appleRed),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            Padding(
+              padding: const EdgeInsets.only(left: 20, bottom: 8),
+              child: const Text(
+                'DÒNG THỜI GIAN HOẠT ĐỘNG',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppleTheme.textSecondary,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator(color: AppleTheme.appleRed))
                   : _activities.isEmpty
                       ? const Center(
-                          child: Text('Chưa có lịch sử hoạt động', style: TextStyle(fontFamily: 'sans-serif', color: AppleTheme.textSecondary)),
+                          child: Text('Chưa có lịch sử hoạt động', style: TextStyle(color: AppleTheme.textSecondary)),
                         )
                       : Container(
                           margin: const EdgeInsets.symmetric(horizontal: 16),
                           decoration: BoxDecoration(
-                            color: AppleTheme.darkSurface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppleTheme.hairlineDivider, width: 0.5),
+                            color: AppleTheme.glassSurface,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
                           ),
                           child: ListView.separated(
-                            padding: EdgeInsets.zero,
+                            padding: const EdgeInsets.only(bottom: 90),
                             itemCount: _activities.length,
                             separatorBuilder: (context, index) => const Divider(
                               color: AppleTheme.hairlineDivider,
@@ -961,7 +1195,6 @@ class _HistoryTabState extends State<HistoryTab> {
                           ),
                         ),
             ),
-            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -1002,11 +1235,11 @@ class _HistoryTabState extends State<HistoryTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 32,
-            height: 32,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: iconColor,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: Colors.white, size: 18),
           ),
@@ -1018,30 +1251,32 @@ class _HistoryTabState extends State<HistoryTab> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      item.title,
-                      style: const TextStyle(
-                        fontFamily: 'sans-serif',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppleTheme.textPrimary,
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppleTheme.textPrimary,
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       timeStr,
                       style: const TextStyle(
-                        fontFamily: 'sans-serif',
                         fontSize: 12,
                         color: AppleTheme.textSecondary,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   item.subtitle,
                   style: const TextStyle(
-                    fontFamily: 'sans-serif',
                     fontSize: 13,
                     color: AppleTheme.textSecondary,
                     height: 1.3,
@@ -1097,7 +1332,6 @@ class _SettingsTabState extends State<SettingsTab> {
 
   Future<void> _checkUpdate() async {
     setState(() => isCheckingUpdate = true);
-
     final releaseInfo = await _updater.checkForUpdate(currentVersion);
 
     if (!mounted) return;
@@ -1107,8 +1341,11 @@ class _SettingsTabState extends State<SettingsTab> {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: AppleTheme.darkSurface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          backgroundColor: AppleTheme.glassSurface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
+          ),
           title: const Text('Ứng Dụng Đã Mới Nhất'),
           content: Text('VFam Admin đang ở phiên bản mới nhất ($currentVersion). Không có bản cập nhật nào.'),
           actions: [
@@ -1128,10 +1365,10 @@ class _SettingsTabState extends State<SettingsTab> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            backgroundColor: AppleTheme.darkSurface,
+            backgroundColor: AppleTheme.glassSurface,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: const BorderSide(color: AppleTheme.hairlineDivider, width: 0.5),
+              borderRadius: BorderRadius.circular(22),
+              side: const BorderSide(color: AppleTheme.glassBorder, width: 0.75),
             ),
             title: Row(
               children: [
@@ -1146,7 +1383,7 @@ class _SettingsTabState extends State<SettingsTab> {
               children: [
                 Text(
                   'Phát hành: ${release.publishedAt.split('T').first}',
-                  style: const TextStyle(fontFamily: 'sans-serif', color: AppleTheme.textSecondary, fontSize: 13),
+                  style: const TextStyle(color: AppleTheme.textSecondary, fontSize: 13),
                 ),
                 const SizedBox(height: 12),
                 const Text('Nội dung cập nhật:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
@@ -1160,8 +1397,8 @@ class _SettingsTabState extends State<SettingsTab> {
                   ),
                   child: SingleChildScrollView(
                     child: Text(
-                      release.releaseNotes.isNotEmpty ? release.releaseNotes : 'Bản cập nhật tối ưu hóa hiệu năng và sửa lỗi.',
-                      style: const TextStyle(fontFamily: 'sans-serif', color: AppleTheme.textSecondary, fontSize: 13, height: 1.3),
+                      release.releaseNotes.isNotEmpty ? release.releaseNotes : 'Bản cập nhật tối ưu hóa giao diện và trải nghiệm.',
+                      style: const TextStyle(color: AppleTheme.textSecondary, fontSize: 13, height: 1.3),
                     ),
                   ),
                 ),
@@ -1180,7 +1417,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   Center(
                     child: Text(
                       'Đang tải: ${(downloadProgress! * 100).toStringAsFixed(1)}%',
-                      style: const TextStyle(fontFamily: 'sans-serif', color: AppleTheme.appleRed, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: const TextStyle(color: AppleTheme.appleRed, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -1212,7 +1449,7 @@ class _SettingsTabState extends State<SettingsTab> {
                       setDialogState(() => downloadProgress = null);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(backgroundColor: Colors.red.shade900, content: Text('Lỗi tải: $e')),
+                          SnackBar(backgroundColor: const Color(0xFF2C0B0E), content: Text('Lỗi tải: $e')),
                         );
                       }
                     }
@@ -1232,52 +1469,72 @@ class _SettingsTabState extends State<SettingsTab> {
     return Scaffold(
       backgroundColor: AppleTheme.darkBackground,
       body: SafeArea(
+        bottom: false,
         child: ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           children: [
             const SizedBox(height: 12),
 
-            // Large Title
+            // Large Title & Subtitle
             const Text(
               'Cài Đặt',
               style: TextStyle(
-                fontFamily: 'sans-serif',
                 fontSize: 34,
                 fontWeight: FontWeight.w700,
                 letterSpacing: -0.5,
                 color: AppleTheme.textPrimary,
               ),
             ),
+            const SizedBox(height: 2),
+            const Text(
+              'Hệ thống, phiên bản và hạ tầng Supabase',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w400,
+                color: AppleTheme.textSecondary,
+              ),
+            ),
 
             const SizedBox(height: 24),
 
             // SECTION 1: CẬP NHẬT ỨNG DỤNG
-            _buildSectionTitle('CẬP NHẬT ỨNG DỤNG'),
+            _buildSectionTitle('BẢN CẬP NHẬT PHẦN MỀM'),
             Container(
               decoration: BoxDecoration(
-                color: AppleTheme.darkSurface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppleTheme.hairlineDivider, width: 0.5),
+                color: AppleTheme.glassSurface,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
               ),
-              child: Column(
-                children: [
-                  _buildSettingsRow(
-                    icon: Icons.info_outline_rounded,
-                    iconColor: AppleTheme.appleBlue,
-                    title: 'Phiên bản ứng dụng',
-                    trailingText: 'v$currentVersion',
-                  ),
-                  const Divider(color: AppleTheme.hairlineDivider, height: 1, indent: 62),
-                  _buildSettingsRow(
-                    icon: Icons.system_update_rounded,
-                    iconColor: AppleTheme.appleRed,
-                    title: 'Kiểm tra bản cập nhật mới',
-                    onTap: isCheckingUpdate ? null : _checkUpdate,
-                    trailingWidget: isCheckingUpdate
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppleTheme.appleRed))
-                        : const Icon(Icons.arrow_forward_ios_rounded, color: AppleTheme.textSecondary, size: 14),
-                  ),
-                ],
+              child: _buildSettingsRow(
+                icon: Icons.system_update_rounded,
+                iconColor: AppleTheme.appleAmber,
+                title: 'Cập nhật ứng dụng',
+                subtitle: 'Phiên bản hiện tại: v$currentVersion',
+                onTap: isCheckingUpdate ? null : _checkUpdate,
+                trailingWidget: isCheckingUpdate
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppleTheme.appleRed))
+                    : Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppleTheme.appleRed.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'v$currentVersion',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppleTheme.appleRed,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_forward_ios_rounded, color: AppleTheme.appleRed, size: 12),
+                          ],
+                        ),
+                      ),
               ),
             ),
 
@@ -1287,9 +1544,9 @@ class _SettingsTabState extends State<SettingsTab> {
             _buildSectionTitle('BẢO MẬT & HẠ TẦNG'),
             Container(
               decoration: BoxDecoration(
-                color: AppleTheme.darkSurface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppleTheme.hairlineDivider, width: 0.5),
+                color: AppleTheme.glassSurface,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: AppleTheme.glassBorder, width: 0.75),
               ),
               child: Column(
                 children: [
@@ -1297,27 +1554,58 @@ class _SettingsTabState extends State<SettingsTab> {
                     icon: Icons.cloud_done_rounded,
                     iconColor: AppleTheme.appleGreen,
                     title: 'Hạ tầng kết nối',
-                    trailingText: 'Supabase Realtime',
+                    subtitle: 'Supabase Realtime WebSocket',
+                    trailingWidget: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: AppleTheme.appleGreen,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Online',
+                          style: TextStyle(fontSize: 13, color: AppleTheme.appleGreen, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
                   ),
                   const Divider(color: AppleTheme.hairlineDivider, height: 1, indent: 62),
                   _buildSettingsRow(
                     icon: Icons.fingerprint_rounded,
                     iconColor: AppleTheme.applePurple,
                     title: 'Phiên phụ huynh',
-                    trailingText: 'Anonymous Auth (Zero-Login)',
+                    subtitle: 'Đăng nhập ẩn danh tự động (Zero-Login)',
+                    trailingWidget: const Icon(Icons.check_circle_rounded, color: AppleTheme.applePurple, size: 20),
                   ),
                   const Divider(color: AppleTheme.hairlineDivider, height: 1, indent: 62),
                   _buildSettingsRow(
                     icon: Icons.security_rounded,
                     iconColor: AppleTheme.appleAmber,
                     title: 'Chính sách bảo vệ',
-                    trailingText: 'Device Admin & DO Enforce',
+                    subtitle: 'Thực thi Device Owner & Device Admin',
+                    trailingWidget: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppleTheme.appleAmber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'Tối cao',
+                        style: TextStyle(fontSize: 12, color: AppleTheme.appleAmber, fontWeight: FontWeight.w600),
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(height: 32),
+            // Padding bottom để không bị che bởi floating bar
+            const SizedBox(height: 110),
           ],
         ),
       ),
@@ -1330,7 +1618,6 @@ class _SettingsTabState extends State<SettingsTab> {
       child: Text(
         title,
         style: const TextStyle(
-          fontFamily: 'sans-serif',
           fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppleTheme.textSecondary,
@@ -1344,47 +1631,50 @@ class _SettingsTabState extends State<SettingsTab> {
     required IconData icon,
     required Color iconColor,
     required String title,
-    String? trailingText,
+    required String subtitle,
     Widget? trailingWidget,
     VoidCallback? onTap,
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(22),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: iconColor,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: Colors.white, size: 18),
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontFamily: 'sans-serif',
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppleTheme.textPrimary,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppleTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppleTheme.textSecondary,
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (trailingText != null)
-              Text(
-                trailingText,
-                style: const TextStyle(
-                  fontFamily: 'sans-serif',
-                  fontSize: 14,
-                  color: AppleTheme.textSecondary,
-                ),
-              ),
             ?trailingWidget,
           ],
         ),
