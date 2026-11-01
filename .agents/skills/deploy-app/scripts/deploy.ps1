@@ -17,25 +17,29 @@ Set-Location $repoRoot
 
 $tag = if ($Target -eq "all") { "v$Version" } else { "$Target-v$Version" }
 $releaseTitle = if ($Target -eq "target") {
-    "Child Agent Release v$Version"
+    "VFam Child Agent Release v$Version"
 } elseif ($Target -eq "admin") {
-    "Parent Admin App Release v$Version"
+    "VFam Parent Admin App Release v$Version"
 } else {
-    "MDM Full Release v$Version"
+    "VFam Parental Control Release v$Version"
 }
 
 Write-Host "Starting Deploy: $Target ($tag)" -ForegroundColor Cyan
 
 $artifacts = @()
+$releaseDir = Join-Path $repoRoot "release"
+if (-not (Test-Path $releaseDir)) {
+    New-Item -ItemType Directory -Force $releaseDir | Out-Null
+}
 
 if ($Target -eq "target" -or $Target -eq "all") {
-    Write-Host "Building Target Node..." -ForegroundColor Yellow
+    Write-Host "Building Target Node (VFam Child)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "target-node")
-    .\gradlew.bat app:assembleDebug
+    .\gradlew.bat assembleDebug
     
     $targetApkPath = Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk"
     if (Test-Path $targetApkPath) {
-        $destTargetApk = Join-Path $repoRoot "mdm-child-agent-$Version.apk"
+        $destTargetApk = Join-Path $releaseDir "vfam-child-$Version.apk"
         Copy-Item -Path $targetApkPath -Destination $destTargetApk -Force
         $artifacts += $destTargetApk
         Write-Host "Target Node APK ready: $destTargetApk" -ForegroundColor Green
@@ -45,13 +49,13 @@ if ($Target -eq "target" -or $Target -eq "all") {
 }
 
 if ($Target -eq "admin" -or $Target -eq "all") {
-    Write-Host "Building Admin Node via Android Gradle..." -ForegroundColor Yellow
-    Set-Location (Join-Path $repoRoot "admin-node\android")
-    .\gradlew.bat app:assembleDebug
+    Write-Host "Building Admin Node (VFam Admin) via Flutter..." -ForegroundColor Yellow
+    Set-Location (Join-Path $repoRoot "admin-node")
+    flutter build apk --debug
     
     $adminApkPath = Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-debug.apk"
     if (Test-Path $adminApkPath) {
-        $destAdminApk = Join-Path $repoRoot "mdm-parent-admin-$Version.apk"
+        $destAdminApk = Join-Path $releaseDir "vfam-admin-$Version.apk"
         Copy-Item -Path $adminApkPath -Destination $destAdminApk -Force
         $artifacts += $destAdminApk
         Write-Host "Admin Node APK ready: $destAdminApk" -ForegroundColor Green
@@ -73,15 +77,14 @@ Write-Host "Creating git tag $tag" -ForegroundColor Cyan
 git tag -a $tag -m "$releaseTitle" -f
 git push origin $tag -f
 
-Write-Host "Publishing GitHub Release via gh CLI..." -ForegroundColor Cyan
-$artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
-$cmd = "gh release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
-Invoke-Expression $cmd
-
-$artifacts | ForEach-Object {
-    if (Test-Path $_) {
-        Remove-Item -Path $_ -Force -ErrorAction SilentlyContinue
-    }
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    Write-Host "Publishing GitHub Release via gh CLI..." -ForegroundColor Cyan
+    $artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
+    $cmd = "gh release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
+    Invoke-Expression $cmd
+    Write-Host "GitHub Release created successfully!" -ForegroundColor Green
+} else {
+    Write-Host "gh CLI not detected. Git tag $tag pushed. APKs saved in release/ directory for distribution." -ForegroundColor Yellow
 }
 
 Write-Host "Release $tag completed successfully!" -ForegroundColor Green
