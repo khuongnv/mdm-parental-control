@@ -2,36 +2,35 @@
 
 [![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B%20(API%2026%2B)-brightgreen.svg)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Architecture-Android%20Device%20Owner%20%2B%20Clean%20Architecture-blue.svg)]()
-[![Backend](https://img.shields.io/badge/Backend-.NET%208%20Web%20API%20%2B%20SignalR-purple.svg)](https://dotnet.microsoft.com/)
-[![Database](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20Redis-red.svg)]()
+[![Backend](https://img.shields.io/badge/Backend-Supabase%20BaaS%20%2B%20Realtime-emerald.svg)](https://supabase.com)
+[![Database](https://img.shields.io/badge/Database-PostgreSQL%2015%2B%20(Supabase)-blue.svg)]()
 [![License](https://img.shields.io/badge/License-Enterprise%20Private-orange.svg)]()
 
 > **Hệ thống giám sát, quản lý thời lượng sử dụng và áp đặt chính sách thiết bị Android (Parental Control / Mobile Device Management) cấp độ doanh nghiệp.**  
-> Khắc phục triệt để các nhược điểm của các ứng dụng quản lý thông thường (dễ bị bypass, force stop, tắt Accessibility, đổi giờ máy hoặc khởi động vào Safe Mode) bằng cách áp dụng đặc quyền **Android Device Owner (DO)** kết hợp **Backend Orchestrator (.NET 8 SignalR)** thời gian thực và **Parent Admin App**.
+> Khắc phục triệt để các nhược điểm của các ứng dụng quản lý thông thường (dễ bị bypass, force stop, tắt Accessibility, đổi giờ máy hoặc khởi động vào Safe Mode) bằng cách áp dụng đặc quyền **Android Device Owner (DO)** kết hợp **Hạ tầng Supabase BaaS & Realtime** thời gian thực và **Parent Admin App**.
 
 ---
 
-## 🏛️ Kiến Trúc Hệ Thống (3-Tier Architecture)
+## 🏛️ Kiến Trúc Hệ Thống (3-Tier Architecture Với Supabase)
 
 Dự án được phân chia thành 3 project con độc lập trong cùng một kho mã nguồn:
 
 ```mermaid
 flowchart TD
-    subgraph AdminNode ["📱 admin-node (Parent App)"]
+    subgraph AdminNode ["📱 admin-node (Parent Flutter App)"]
         ParentUI[Dashboard & Real-time Analytics]
         RulesUI[Bộ cấu hình Quota & Bedtime]
         PanicBtn[Nút Khóa Khẩn Cấp / Thưởng Giờ]
-        QRScanner[Trình Quét Camera QR Ghép Nối]
+        SupaFlutter[supabase_flutter SDK]
     end
 
-    subgraph Backend ["☁️ backend (.NET 8 Web API & SignalR)"]
-        AuthService[Identity & 1-Step Pairing Service]
-        PolicyEngine[Policy Management & ETag Sync]
-        SignalRHub[SignalR Real-time Hub <3s]
-        RedisBackplane[(Redis Pub/Sub & Cache)]
-        Ingestion[Channels Ingestion Worker 15m]
-        MainDB[(PostgreSQL Database)]
-        FCMService[Firebase Cloud Messaging Gateway]
+    subgraph Backend ["☁️ backend (Supabase BaaS & Realtime)"]
+        AuthService[Supabase Auth & RLS Isolation]
+        PolicyEngine[Postgres Policies & app_rules]
+        RealtimeHub[Supabase Realtime Broadcast & Presence <100ms]
+        RPCService[Pairing RPC: create & claim pairing]
+        MainDB[(PostgreSQL 15+ Database)]
+        FCMService[Supabase Edge Functions / FCM Push]
     end
 
     subgraph TargetNode ["📱 target-node (Child DO Agent)"]
@@ -40,14 +39,13 @@ flowchart TD
         NativeSuspension[setPackagesSuspended & Hidden]
         UsageEngine[UsageStatsManager queryEvents]
         LocalRoom[(Room DB Offline Buffer)]
-        SocketClient[SignalR Client & FCM Receiver]
+        SocketClient[Supabase Realtime Client & PostgREST]
     end
 
     %% Communication Flows
-    AdminNode <-->|REST API & SignalR| Backend
-    Backend <-->|SignalR WebSocket < 3s & FCM Push| TargetNode
-    TargetNode -.->|Batch Telemetry 15m| Backend
-    QRScanner -.->|Quét mã 1 bước| TargetNode
+    AdminNode <-->|supabase_flutter: Realtime Stream & RPC| Backend
+    Backend <-->|Realtime Phoenix WebSocket < 100ms & RPC| TargetNode
+    TargetNode -.->|Batch Telemetry 15m PostgREST| Backend
 ```
 
 ---

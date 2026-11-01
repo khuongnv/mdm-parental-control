@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -20,6 +22,17 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        val properties = Properties()
+        val localPropertiesFile = rootProject.file("local.properties")
+        if (localPropertiesFile.exists()) {
+            properties.load(localPropertiesFile.inputStream())
+        }
+        val supabaseUrl = properties.getProperty("supabase.url") ?: "https://ueamgqbxgyzxruzzjofm.supabase.co"
+        val supabaseAnonKey = properties.getProperty("supabase.anon.key") ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlYW1ncWJ4Z3l6eHJ1enpqb2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1MjQyMjAsImV4cCI6MjEwOTEwMDIyMH0.D7qTyUR-_fAMZMrjZejKuX06ZycZsMMq-9zKBpBGFFc"
+
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
 
     buildTypes {
@@ -43,6 +56,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 
@@ -75,12 +89,12 @@ dependencies {
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Network & Real-time
+    // Network & Real-time (OkHttp WebSocket for Supabase Realtime)
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    implementation("com.microsoft.signalr:signalr:8.0.7")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

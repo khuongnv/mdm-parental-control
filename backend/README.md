@@ -1,35 +1,47 @@
-# ☁️ Backend: Central Orchestrator & Real-Time Pipeline (.NET Core)
+# ☁️ Backend: Supabase BaaS & Real-Time Orchestrator
 
-Máy chủ điều phối trung tâm của hệ thống **MDM Parental Control**, được xây dựng trên nền tảng **ASP.NET Core (.NET 8 / .NET 9)** hiệu năng cao, chịu trách nhiệm quản lý định danh, bảo mật phiên kết nối, duy trì đường truyền điều khiển 2 chiều thời gian thực và xử lý khối lượng lớn dữ liệu telemetry thời gian sử dụng.
+Hệ thống máy chủ điều phối trung tâm của giải pháp **MDM Parental Control**, được triển khai trên nền tảng **Supabase** (PostgreSQL 15+, Supabase Realtime Phoenix WebSockets, Row Level Security, Auth & Edge Functions).
 
----
-
-## 🎯 1. Vai Trò & Trách Nhiệm Chính
-- **Định Danh & Ghép Nối 1 Bước (Pairing & Auth)**: Quản lý tài khoản phụ huynh, sinh mã OTP/QR Token 1 lần (TTL 5 phút) để ghép nối an toàn với máy con, cấp phát JWT/mTLS token mã hóa định danh.
-- **Quản Lý & Phân Phối Chính Sách (Policy Engine)**: Lưu trữ lịch biểu hạn mức sử dụng (Daily Quota, Bedtime, App Rules), kiểm tra phiên bản ETag differential sync để giảm thiểu băng thông.
-- **Kênh Điều Khiển Thời Gian Thực (< 3s)**: **ASP.NET Core SignalR Hubs** (hoặc WebSockets/MQTTnet) kết hợp **Redis Backplane (`StackExchange.Redis`)** để đẩy tức thì các lệnh khẩn cấp (Panic Lockdown, Thưởng thêm +15m).
-- **Kênh Dự Phòng FCM**: Tích hợp `FirebaseAdmin` .NET SDK chính chủ từ Google để gửi FCM High-Priority Data Push đánh thức máy con khi socket bị ngắt.
-- **Ingestion & Tổng Hợp Dữ Liệu Lớn**: Cổng tiếp nhận batch usage logs định kỳ 15 phút, sử dụng `System.Threading.Channels` và `BackgroundService` để xử lý bất đồng bộ không làm nghẽn HTTP thread pool; tổng hợp time-series theo giờ/ngày/tuần/tháng cho Parent Dashboard.
+> [!NOTE]
+> Hệ thống đã được chuyển đổi từ mô hình tự vận hành Web API sang **Supabase BaaS** theo [EPIC 04: Thay Thế & Tối Ưu Backend Bằng Supabase](../docs/epics/EPIC_04_Supabase_Backend_Replacement.md) để đạt độ trễ thời gian thực < 100ms, loại bỏ chi phí quản lý máy chủ và tận dụng trực tiếp tính năng reactive của `supabase_flutter`.
 
 ---
 
-## 🛠️ 2. Kiến Trúc & Công Nghệ Chuẩn Hóa (.NET Core Stack)
-- **Framework**: ASP.NET Core Web API (.NET 8 LTS / .NET 9).
-- **Kiến trúc**: Clean Architecture + CQRS với MediatR.
-- **Real-time Engine**: **ASP.NET Core SignalR** (hỗ trợ JSON & MessagePack binary protocol) + Redis Backplane (`Microsoft.AspNetCore.SignalR.StackExchangeRedis`).
-- **Cơ sở dữ liệu**:
-  - **PostgreSQL** kết hợp **EF Core 8** (Npgsql) cho dữ liệu quan hệ (Users, Devices, Policies, Audit Logs).
-  - **Dapper** cho các truy vấn báo cáo thời gian sử dụng và dashboard siêu tốc.
-  - **Redis** cho Caching, Session Token (mã ghép nối OTP/QR) và SignalR scale-out.
-- **Hàng đợi & Tác vụ ngầm**: `System.Threading.Channels` cho Ingestion Pipeline; **Hangfire** hoặc `IHostedService` cho cron job tổng hợp báo cáo và reset quota ngày lúc 00:00:00.
-- **Bảo mật**: ASP.NET Core Identity + JWT Bearer Authentication, Rate Limiting Middleware (`System.Threading.RateLimiting`).
+## 🎯 1. Năng Lực Cốt Lõi Trên Supabase
+- **Kênh Điều Khiển Tức Thời (< 100ms)**: Sử dụng **Supabase Realtime Broadcast** trên kênh `device:{id}` để gửi lệnh Khóa Khẩn Cấp (`PANIC_LOCKDOWN`) và Thưởng Giờ (`GRANT_EXTRA_TIME`) tới máy con mà không cần qua hàng đợi HTTP.
+- **Theo Dõi Trạng Thái Trực Tuyến Tự Động (Presence)**: Supabase Presence tự động phát hiện thiết bị con Online hay Offline dựa trên trạng thái kết nối socket mà không cần lập trình Redis heartbeat thủ công.
+- **Bảo Mật Đa Tầng Cấp Cơ Sở Dữ Liệu (Postgres RLS)**: Toàn bộ bảng dữ liệu (`devices`, `families`, `policies`, `app_rules`, `daily_usage_summaries`) được bảo vệ bằng Row Level Security (RLS) để cô lập dữ liệu giữa các gia đình.
+- **Ghép Nối OTP 1 Lần Trong 1 Bước**: Stored Procedure `create_device_pairing` và `claim_device_pairing` xử lý trọn gói việc tạo mã OTP 6 số (TTL 5 phút), xác thực và liên kết thiết bị vào gia đình an toàn.
+- **Tổng Hợp Telemetry Tự Động**: Stored Procedure `aggregate_device_daily_usage` gom nhóm thời gian On-Screen theo từng danh mục (Học tập, Game, Mạng xã hội, Giải trí) phục vụ biểu đồ Dashboard của phụ huynh.
 
 ---
 
-## 📋 3. Danh Sách Epics Chi Tiết
-Xem tài liệu đặc tả đầy đủ tại: [`docs/epics/backend_epics.md`](../docs/epics/backend_epics.md)
-- **B-EPIC 01**: Quản Lý Định Danh, Xác Thực & Ghép Nối Thiết Bị (Identity & Pairing Engine).
-- **B-EPIC 02**: Quản Trị & Đồng Bộ Chính Sách (Rule & Policy Management Engine).
-- **B-EPIC 03**: Đường Truyền Thời Gian Thực Siêu Tốc & Dự Phòng FCM (Real-Time Pipeline).
-- **B-EPIC 04**: Ingestion Pipeline & Thống Kê Báo Cáo Dữ Liệu Lớn (Telemetry & Analytics).
-- **B-EPIC 05**: An Ninh Doanh Nghiệp, Kiểm Toán & Giới Hạn Tần Suất (Enterprise Security).
+## 📂 2. Cấu Trúc Thư Mục Backend
+```
+backend/
+├── supabase/
+│   ├── .env                      # Credentials & Service Role Key (Git-ignored)
+│   └── migrations/
+│       └── 20261101_initial_schema.sql  # Toàn bộ Schema, Indexes, RLS Policies, RPCs & Realtime Publication
+│
+└── [Legacy] .NET Core 8 Solution # Kiến trúc Web API cũ (Lưu trữ tham khảo)
+    ├── MdmParentalControl.sln
+    ├── Mdm.Backend.Api/
+    ├── Mdm.Backend.Core/
+    └── Mdm.Backend.Infrastructure/
+```
+
+---
+
+## 🚀 3. Hướng Dẫn Triển Khai (Deployment)
+1. Đăng nhập vào [Supabase Dashboard](https://supabase.com/dashboard) của dự án (`ueamgqbxgyzxruzzjofm`).
+2. Mở mục **SQL Editor**.
+3. Dán nội dung tệp [`backend/supabase/migrations/20261101_initial_schema.sql`](./supabase/migrations/20261101_initial_schema.sql) và bấm **Run**.
+4. Toàn bộ bảng, chính sách RLS, hàm RPC và Realtime Publication sẽ được kích hoạt tức thì.
+
+---
+
+## 📋 4. Đặc Tả Chi Tiết Epics
+Xem tài liệu kiến trúc chuyển đổi chi tiết tại:
+- [`docs/epics/EPIC_04_Supabase_Backend_Replacement.md`](../docs/epics/EPIC_04_Supabase_Backend_Replacement.md)
+- [`docs/epics/backend_epics.md`](../docs/epics/backend_epics.md)
