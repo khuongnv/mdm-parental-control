@@ -1,4 +1,4 @@
-package com.mdm.parentalcontrol.mdm_admin_app
+package vn.hanoi.khuongnv.vfam.admin
 
 import io.flutter.embedding.android.FlutterActivity
 

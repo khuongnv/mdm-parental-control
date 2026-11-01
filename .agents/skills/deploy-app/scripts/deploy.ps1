@@ -49,11 +49,20 @@ if ($Target -eq "target" -or $Target -eq "all") {
 }
 
 if ($Target -eq "admin" -or $Target -eq "all") {
-    Write-Host "Building Admin Node (VFam Admin) via Flutter..." -ForegroundColor Yellow
+    Write-Host "Building Admin Node (VFam Admin)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "admin-node")
-    flutter build apk --debug
+    try {
+        flutter build apk --release
+    } catch {
+        Write-Host "Flutter CLI direct build warning, falling back to Android Gradle assembleRelease..." -ForegroundColor DarkYellow
+        Set-Location (Join-Path $repoRoot "admin-node\android")
+        .\gradlew.bat assembleRelease
+    }
     
-    $adminApkPath = Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-debug.apk"
+    $adminApkPath = Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-release.apk"
+    if (-not (Test-Path $adminApkPath)) {
+        $adminApkPath = Join-Path $repoRoot "admin-node\build\app\outputs\apk\release\app-release.apk"
+    }
     if (Test-Path $adminApkPath) {
         $destAdminApk = Join-Path $releaseDir "vfam-admin-$Version.apk"
         Copy-Item -Path $adminApkPath -Destination $destAdminApk -Force
