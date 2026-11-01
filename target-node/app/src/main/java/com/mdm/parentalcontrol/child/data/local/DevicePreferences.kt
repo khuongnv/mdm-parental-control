@@ -28,6 +28,10 @@ class DevicePreferences @Inject constructor(
         get() = prefs.getString(KEY_OTP_CODE, null)
         set(value) = prefs.edit().putString(KEY_OTP_CODE, value).apply()
 
+    var qrToken: String?
+        get() = prefs.getString(KEY_QR_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_QR_TOKEN, value).apply()
+
     var deviceName: String?
         get() = prefs.getString(KEY_DEVICE_NAME, null)
         set(value) = prefs.edit().putString(KEY_DEVICE_NAME, value).apply()
@@ -40,11 +44,12 @@ class DevicePreferences @Inject constructor(
         get() = prefs.getLong(KEY_PAIRED_AT, 0L)
         set(value) = prefs.edit().putLong(KEY_PAIRED_AT, value).apply()
 
-    fun savePairing(deviceId: String, otpCode: String?, deviceName: String?) {
+    fun savePairing(deviceId: String, otpCode: String?, deviceName: String?, qrToken: String? = null) {
         prefs.edit()
             .putString(KEY_DEVICE_ID, deviceId)
             .putString(KEY_OTP_CODE, otpCode)
             .putString(KEY_DEVICE_NAME, deviceName)
+            .putString(KEY_QR_TOKEN, qrToken)
             .apply()
     }
 
@@ -54,6 +59,7 @@ class DevicePreferences @Inject constructor(
             .putString(KEY_DEVICE_NAME, deviceName)
             .putBoolean(KEY_IS_PAIRED, true)
             .remove(KEY_OTP_CODE)
+            .remove(KEY_QR_TOKEN)
             .putLong(KEY_PAIRED_AT, System.currentTimeMillis())
             .apply()
     }
@@ -67,6 +73,7 @@ class DevicePreferences @Inject constructor(
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_IS_PAIRED = "is_paired"
         private const val KEY_OTP_CODE = "otp_code"
+        private const val KEY_QR_TOKEN = "qr_token"
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_PAIRED_AT = "paired_at"

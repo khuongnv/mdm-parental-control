@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -98,7 +99,9 @@ class MainActivity : AppCompatActivity() {
         var deviceId by remember { mutableStateOf(devicePreferences.deviceId) }
         var deviceName by remember { mutableStateOf(devicePreferences.deviceName ?: "${Build.MANUFACTURER} ${Build.MODEL}") }
         var otpCode by remember { mutableStateOf(devicePreferences.otpCode) }
+        var qrToken by remember { mutableStateOf(devicePreferences.qrToken) }
         var isGeneratingOtp by remember { mutableStateOf(false) }
+        var selectedPairingTab by remember { mutableStateOf(0) } // 0: Mã Số OTP, 1: QR Code
 
         // Dữ liệu giám sát thời lượng sử dụng hôm nay
         var todayScreenTimeMinutes by remember { mutableStateOf(0) }
@@ -147,6 +150,7 @@ class MainActivity : AppCompatActivity() {
                         lifecycleScope.launch(Dispatchers.Main) {
                             isPaired = true
                             otpCode = null
+                            qrToken = null
                         }
                     }
                 }
@@ -187,6 +191,7 @@ class MainActivity : AppCompatActivity() {
                             devicePreferences.completePairing(id, deviceName)
                             isPaired = true
                             otpCode = null
+                            qrToken = null
                             toastMessage = "✨ Ghép nối thành công với Phụ huynh!"
                             toastSuccess = true
                             refreshAllStatus()
@@ -296,7 +301,7 @@ class MainActivity : AppCompatActivity() {
                             SettingsSectionHeader(title = "TRẠNG THÁI KẾT NỐI VỚI PHỤ HUYNH")
 
                             if (isPaired) {
-                                // GIAO DIỆN KHI ĐÃ GHÉP NỐI THÀNH CÔNG: KHÔNG CÒN NÚT TẠO MÃ OTP!
+                                // GIAO DIỆN KHI ĐÃ GHÉP NỐI THÀNH CÔNG: KHÔNG CÒN NÚT TẠO MÃ OTP/QR!
                                 SettingsGroupCard {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -442,7 +447,7 @@ class MainActivity : AppCompatActivity() {
                                     )
                                 }
                             } else {
-                                // GIAO DIỆN KHI CHƯA GHÉP NỐI: CÓ NÚT TẠO MÃ OTP VÀ HIỂN THỊ MÃ
+                                // GIAO DIỆN KHI CHƯA GHÉP NỐI: CÓ NÚT TẠO MÃ OTP/QR VÀ HIỂN THỊ
                                 SettingsGroupCard {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -474,7 +479,7 @@ class MainActivity : AppCompatActivity() {
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                text = "Hãy tạo mã kết nối OTP để Phụ huynh quét hoặc nhập trên app Admin.",
+                                                text = "Hãy tạo mã kết nối OTP hoặc QR để Phụ huynh quét hoặc nhập trên app Admin.",
                                                 style = MaterialTheme.typography.bodyMedium.copy(
                                                     fontSize = 13.sp
                                                 ),
@@ -490,17 +495,17 @@ class MainActivity : AppCompatActivity() {
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                                                 .padding(horizontal = 12.dp, vertical = 8.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Column {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = "Mã thiết bị (Device ID):",
                                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                                     color = Gray93
                                                 )
+                                                Spacer(modifier = Modifier.height(2.dp))
                                                 Text(
                                                     text = deviceId!!,
                                                     style = MaterialTheme.typography.bodySmall.copy(
@@ -508,10 +513,13 @@ class MainActivity : AppCompatActivity() {
                                                         fontWeight = FontWeight.Medium,
                                                         fontSize = 11.sp
                                                     ),
-                                                    color = MaterialTheme.colorScheme.onSurface
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
-                                            TextButton(
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Button(
                                                 onClick = {
                                                     toastMessage = "Đang kiểm tra ghép nối trên máy chủ..."
                                                     toastSuccess = true
@@ -521,6 +529,7 @@ class MainActivity : AppCompatActivity() {
                                                             lifecycleScope.launch(Dispatchers.Main) {
                                                                 isPaired = true
                                                                 otpCode = null
+                                                                qrToken = null
                                                                 toastMessage = "✨ Đã xác nhận ghép nối thành công!"
                                                                 toastSuccess = true
                                                             }
@@ -532,7 +541,11 @@ class MainActivity : AppCompatActivity() {
                                                         }
                                                     }
                                                 },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                shape = RoundedCornerShape(8.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = AppleEmerald.copy(alpha = 0.2f)
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                             ) {
                                                 Text(
                                                     text = "Kiểm tra",
@@ -540,7 +553,8 @@ class MainActivity : AppCompatActivity() {
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
                                                     ),
-                                                    color = AppleEmerald
+                                                    color = AppleEmerald,
+                                                    maxLines = 1
                                                 )
                                             }
                                         }
@@ -549,65 +563,180 @@ class MainActivity : AppCompatActivity() {
                                     Spacer(modifier = Modifier.height(14.dp))
 
                                     if (otpCode != null) {
-                                        // Khối hiển thị mã OTP nổi bật kiểu Apple
+                                        // Khối hiển thị mã OTP hoặc QR Code kiểu Apple
                                         Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(RoundedCornerShape(14.dp))
                                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                                .padding(16.dp),
+                                                .padding(14.dp),
                                             horizontalAlignment = Alignment.CenterHorizontally
                                         ) {
-                                            Text(
-                                                text = "MÃ GHÉP NỐI CỦA THIẾT BỊ (OTP)",
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    fontSize = 12.sp,
-                                                    letterSpacing = 1.sp
-                                                ),
-                                                color = AppleEmerald
-                                            )
-
-                                            Spacer(modifier = Modifier.height(12.dp))
-
-                                            // Hiển thị từng ký tự OTP trong các ô vuông cách điệu
+                                            // Tab chuyển đổi: [ Mã Số OTP ] | [ Mã QR Code ]
                                             Row(
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(MaterialTheme.colorScheme.surface)
+                                                    .padding(3.dp)
                                             ) {
-                                                otpCode!!.forEach { char ->
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(42.dp)
-                                                            .clip(RoundedCornerShape(10.dp))
-                                                            .background(MaterialTheme.colorScheme.surface)
-                                                            .border(1.dp, AppleEmerald.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(if (selectedPairingTab == 0) AppleEmerald else Color.Transparent)
+                                                        .clickable { selectedPairingTab = 0 }
+                                                        .padding(vertical = 7.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Pin,
+                                                            contentDescription = null,
+                                                            tint = if (selectedPairingTab == 0) Color.White else Gray93,
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
                                                         Text(
-                                                            text = char.toString(),
-                                                            style = MaterialTheme.typography.headlineLarge.copy(
-                                                                fontWeight = FontWeight.Bold,
-                                                                fontSize = 22.sp
+                                                            text = "Mã Số OTP",
+                                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                                fontWeight = if (selectedPairingTab == 0) FontWeight.Bold else FontWeight.Normal,
+                                                                fontSize = 13.sp
                                                             ),
-                                                            color = MaterialTheme.colorScheme.onSurface
+                                                            color = if (selectedPairingTab == 0) Color.White else Gray93
+                                                        )
+                                                    }
+                                                }
+
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(if (selectedPairingTab == 1) AppleEmerald else Color.Transparent)
+                                                        .clickable { selectedPairingTab = 1 }
+                                                        .padding(vertical = 7.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.QrCode,
+                                                            contentDescription = null,
+                                                            tint = if (selectedPairingTab == 1) Color.White else Gray93,
+                                                            modifier = Modifier.size(15.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = "Mã QR Code",
+                                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                                fontWeight = if (selectedPairingTab == 1) FontWeight.Bold else FontWeight.Normal,
+                                                                fontSize = 13.sp
+                                                            ),
+                                                            color = if (selectedPairingTab == 1) Color.White else Gray93
                                                         )
                                                     }
                                                 }
                                             }
 
+                                            Spacer(modifier = Modifier.height(14.dp))
+
+                                            if (selectedPairingTab == 0) {
+                                                // TAB 1: HIỂN THỊ MÃ SỐ OTP 6 Ô VUÔNG CĂN CHỈNH VỪA VẶN
+                                                Text(
+                                                    text = "MÃ GHÉP NỐI 6 CHỮ SỐ (OTP)",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 11.sp,
+                                                        letterSpacing = 0.8.sp
+                                                    ),
+                                                    color = AppleEmerald
+                                                )
+
+                                                Spacer(modifier = Modifier.height(10.dp))
+
+                                                // 6 ô số được căn giữa cân đối, kích thước 36dp x 36dp
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    otpCode!!.forEachIndexed { index, char ->
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(36.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(MaterialTheme.colorScheme.surface)
+                                                                .border(1.dp, AppleEmerald.copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = char.toString(),
+                                                                style = MaterialTheme.typography.headlineLarge.copy(
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 19.sp
+                                                                ),
+                                                                color = MaterialTheme.colorScheme.onSurface
+                                                            )
+                                                        }
+                                                        if (index < otpCode!!.length - 1) {
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(12.dp))
+
+                                                Text(
+                                                    text = "👉 Mở ứng dụng VFam Admin và nhập mã 6 số này để kết nối.",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize = 13.sp,
+                                                        textAlign = TextAlign.Center
+                                                    ),
+                                                    color = Gray93
+                                                )
+                                            } else {
+                                                // TAB 2: HIỂN THỊ MÃ QR CODE
+                                                Text(
+                                                    text = "QUÉT MÃ QR TỪ MÁY PHỤ HUYNH",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 11.sp,
+                                                        letterSpacing = 0.8.sp
+                                                    ),
+                                                    color = AppleEmerald
+                                                )
+
+                                                Spacer(modifier = Modifier.height(10.dp))
+
+                                                val qrData = "vfam://pair?otp=$otpCode&device=$deviceId&token=${qrToken ?: ""}"
+                                                QrCodeCard(
+                                                    content = qrData,
+                                                    size = 170.dp
+                                                )
+
+                                                Spacer(modifier = Modifier.height(10.dp))
+
+                                                Text(
+                                                    text = "Mã OTP: [ $otpCode ]",
+                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 16.sp
+                                                    ),
+                                                    color = AppleEmerald
+                                                )
+
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                Text(
+                                                    text = "Mở app VFam Admin và quét mã QR trên để liên kết tức thì.",
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        fontSize = 12.sp,
+                                                        textAlign = TextAlign.Center
+                                                    ),
+                                                    color = Gray93
+                                                )
+                                            }
+
                                             Spacer(modifier = Modifier.height(12.dp))
-
-                                            Text(
-                                                text = "👉 Mở ứng dụng VFam Admin và nhập mã 6 số này để kết nối.",
-                                                style = MaterialTheme.typography.bodyMedium.copy(
-                                                    fontSize = 13.sp,
-                                                    textAlign = TextAlign.Center
-                                                ),
-                                                color = Gray93
-                                            )
-
-                                            Spacer(modifier = Modifier.height(10.dp))
 
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically
@@ -631,7 +760,7 @@ class MainActivity : AppCompatActivity() {
                                         Spacer(modifier = Modifier.height(14.dp))
                                     }
 
-                                    // Nút tạo mã kết nối - Được thiết kế vừa vặn 1 dòng không bị cắt chữ
+                                    // Nút tạo mã kết nối
                                     Button(
                                         onClick = {
                                             isGeneratingOtp = true
@@ -642,7 +771,7 @@ class MainActivity : AppCompatActivity() {
                                                 model = model,
                                                 osVersion = osVersion,
                                                 onSuccess = { result ->
-                                                    devicePreferences.savePairing(result.deviceId, result.otpCode, deviceName)
+                                                    devicePreferences.savePairing(result.deviceId, result.otpCode, deviceName, result.qrToken)
                                                     val fcm = devicePreferences.fcmToken
                                                     if (!fcm.isNullOrEmpty()) {
                                                         supabaseClient.updateFcmToken(result.deviceId, fcm)
@@ -650,8 +779,9 @@ class MainActivity : AppCompatActivity() {
                                                     lifecycleScope.launch(Dispatchers.Main) {
                                                         deviceId = result.deviceId
                                                         otpCode = result.otpCode
+                                                        qrToken = result.qrToken
                                                         isGeneratingOtp = false
-                                                        toastMessage = "✨ Đã tạo mã OTP mới thành công!"
+                                                        toastMessage = "✨ Đã tạo mã ghép nối mới thành công!"
                                                         toastSuccess = true
                                                     }
                                                 },
@@ -699,7 +829,7 @@ class MainActivity : AppCompatActivity() {
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = if (otpCode != null) "Tạo Lại Mã OTP Khác" else "Tạo Mã Ghép Nối (OTP)",
+                                                text = if (otpCode != null) "Tạo Lại Mã OTP / QR Khác" else "Tạo Mã Ghép Nối (OTP / QR)",
                                                 style = MaterialTheme.typography.bodyLarge.copy(
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontSize = 15.sp
