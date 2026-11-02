@@ -29,6 +29,12 @@ void main() async {
   } catch (e) {
     debugPrint('Supabase init error: $e');
   }
+  // Khởi động dịch vụ chạy ngầm duy trì socket liên tục khi khóa màn hình
+  try {
+    const MethodChannel('vn.hanoi.khuongnv.vfam.admin/updater').invokeMethod('startBackgroundService');
+  } catch (e) {
+    debugPrint('Start background service error: $e');
+  }
   runApp(const MdmParentApp());
 }
 

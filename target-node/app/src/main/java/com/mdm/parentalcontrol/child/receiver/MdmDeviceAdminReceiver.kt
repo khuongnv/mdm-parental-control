@@ -61,6 +61,14 @@ class MdmDeviceAdminReceiver : DeviceAdminReceiver() {
                 )
             }
 
+            // 8. Tu dong cap quyen WAKE_LOCK
+            dpm.setPermissionGrantState(
+                admin,
+                context.packageName,
+                android.Manifest.permission.WAKE_LOCK,
+                DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+            )
+
             Log.i(TAG, "Successfully enforced enterprise anti-tampering restrictions.")
         } catch (e: Exception) {
             Log.e(TAG, "Error applying anti-tampering policies", e)

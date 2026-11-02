@@ -101,6 +101,28 @@ class MainActivity : FlutterActivity() {
                         result.error("INSTALL_ERROR", "Lỗi khởi động trình cài đặt: ${e.message}", null)
                     }
                 }
+                "startBackgroundService" -> {
+                    try {
+                        val serviceIntent = Intent(this, AdminBackgroundProtectionService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(serviceIntent)
+                        } else {
+                            startService(serviceIntent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SERVICE_ERROR", e.message, null)
+                    }
+                }
+                "stopBackgroundService" -> {
+                    try {
+                        val serviceIntent = Intent(this, AdminBackgroundProtectionService::class.java)
+                        stopService(serviceIntent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SERVICE_ERROR", e.message, null)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }

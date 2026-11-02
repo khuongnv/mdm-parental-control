@@ -301,3 +301,9 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.family_invites;
     END IF;
 END $$;
+
+-- 7. FIX RLS ON DEVICES (Cho phép máy con cập nhật fcm_token và telemetry bằng anon key)
+DROP POLICY IF EXISTS "Agents can update telemetry and fcm_token" ON public.devices;
+CREATE POLICY "Agents can update telemetry and fcm_token" ON public.devices
+    FOR UPDATE USING (true) WITH CHECK (true);
+

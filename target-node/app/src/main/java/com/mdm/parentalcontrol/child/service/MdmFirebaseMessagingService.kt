@@ -61,12 +61,33 @@ class MdmFirebaseMessagingService : FirebaseMessagingService() {
             ACTION_PANIC_LOCKDOWN -> {
                 val isLocked = data["is_locked"]?.toBoolean() ?: true
                 Log.w(TAG, "🚨 Executing PANIC_LOCKDOWN via FCM: $isLocked")
+                ChildNotificationHelper.showPanicLockdownNotification(this, isLocked)
                 handlePanicLockdown(isLocked)
             }
-            ACTION_GRANT_EXTRA_TIME -> {
-                val extraMinutes = data["extra_minutes"]?.toIntOrNull() ?: 15
+            ACTION_GRANT_EXTRA_TIME, ACTION_ADJUST_TIME -> {
+                val extraMinutes = data["extra_minutes"]?.toIntOrNull()
+                    ?: data["delta_minutes"]?.toIntOrNull() ?: 15
+                val reason = data["reason"]
                 Log.i(TAG, "⏳ Granting extra time via FCM: +$extraMinutes mins")
+                ChildNotificationHelper.showTimeAdjustedNotification(this, extraMinutes, reason)
                 handleGrantExtraTime(extraMinutes)
+            }
+            ACTION_REMOTE_MESSAGE -> {
+                val msgId = data["message_id"] ?: System.currentTimeMillis().toString()
+                val title = data["title"] ?: "🔔 Nhắc nhở từ Ba Mẹ"
+                val body = data["body"] ?: ""
+                val devId = devicePreferences.deviceId ?: ""
+                Log.i(TAG, "💬 Received REMOTE_MESSAGE via FCM: $title - $body")
+                ChildNotificationHelper.showRemoteMessageNotification(this, devId, msgId, title, body)
+            }
+            ACTION_TIME_REQUEST_RESOLVED -> {
+                val status = data["status"] ?: "approved"
+                val granted = data["granted_minutes"]?.toIntOrNull() ?: 0
+                Log.i(TAG, "✅ Received TIME_REQUEST_RESOLVED via FCM: $status (+$granted min)")
+                ChildNotificationHelper.showTimeRequestResolvedNotification(this, status, granted)
+                if (status == "approved" && granted > 0) {
+                    handleGrantExtraTime(granted)
+                }
             }
             ACTION_SYNC_POLICY -> {
                 Log.i(TAG, "🔄 Sync policy requested via FCM")
@@ -137,6 +158,9 @@ class MdmFirebaseMessagingService : FirebaseMessagingService() {
         private const val TAG = "MdmFCMService"
         const val ACTION_PANIC_LOCKDOWN = "PANIC_LOCKDOWN"
         const val ACTION_GRANT_EXTRA_TIME = "GRANT_EXTRA_TIME"
+        const val ACTION_ADJUST_TIME = "ADJUST_SCREEN_TIME"
+        const val ACTION_REMOTE_MESSAGE = "REMOTE_MESSAGE"
+        const val ACTION_TIME_REQUEST_RESOLVED = "TIME_REQUEST_RESOLVED"
         const val ACTION_SYNC_POLICY = "SYNC_POLICY"
     }
 }

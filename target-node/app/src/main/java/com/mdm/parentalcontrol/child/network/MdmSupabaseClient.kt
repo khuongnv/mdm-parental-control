@@ -30,6 +30,21 @@ class MdmSupabaseClient @Inject constructor() {
     private var heartbeatRunnable: Runnable? = null
     private var isConnected = false
 
+    data class RealtimeCallbacks(
+        val onPanicLockdown: ((Boolean) -> Unit)? = null,
+        val onExtraTime: ((Int) -> Unit)? = null,
+        val onAdjustTime: ((deltaMinutes: Int, reason: String?) -> Unit)? = null,
+        val onRemoteMessage: ((messageId: String, title: String, body: String, templateKey: String?) -> Unit)? = null,
+        val onTimeRequestResolved: ((status: String, grantedMinutes: Int) -> Unit)? = null,
+        val onDeviceUnpaired: (() -> Unit)? = null,
+        val onPairingSuccess: (() -> Unit)? = null
+    )
+
+    private val callbackList = java.util.concurrent.CopyOnWriteArrayList<RealtimeCallbacks>()
+    private var currentConnectedDeviceId: String? = null
+    private var reconnectHandler: Handler? = null
+    private var reconnectRunnable: Runnable? = null
+
     private val supabaseUrl = BuildConfig.SUPABASE_URL
     private val anonKey = BuildConfig.SUPABASE_ANON_KEY
 
@@ -231,7 +246,7 @@ class MdmSupabaseClient @Inject constructor() {
 
     /**
      * Kết nối Supabase Realtime WebSocket (Phoenix Channels Protocol)
-     * Hỗ trợ đầy đủ các sự kiện Giai đoạn 2: Panic Lockdown, Thưởng/Phạt động, Tin nhắn phụ huynh, Duyệt xin giờ, Hủy ghép nối
+     * Hỗ trợ đa listener (Service + UI), tự động duy trì kết nối ngầm 24/7 và auto-reconnect sau 5s nếu rớt mạng
      */
     fun connectRealtime(
         deviceId: String,
@@ -243,8 +258,22 @@ class MdmSupabaseClient @Inject constructor() {
         onDeviceUnpaired: (() -> Unit)? = null,
         onPairingSuccess: (() -> Unit)? = null
     ) {
-        disconnect()
+        val callbacks = RealtimeCallbacks(
+            onPanicLockdown, onExtraTime, onAdjustTime, onRemoteMessage, onTimeRequestResolved, onDeviceUnpaired, onPairingSuccess
+        )
+        callbackList.add(callbacks)
+        currentConnectedDeviceId = deviceId
 
+        if (isConnected && webSocket != null) {
+            Log.i(TAG, "⚡ Supabase Realtime already connected, registered new listener.")
+            return
+        }
+
+        reconnectHandler?.removeCallbacksAndMessages(null)
+        establishWebSocket(deviceId)
+    }
+
+    private fun establishWebSocket(deviceId: String) {
         val host = supabaseUrl.replace("https://", "").replace("http://", "")
         val wsUrl = "wss://$host/realtime/v1/websocket?apikey=$anonKey&vsn=1.0.0"
         val topic = "realtime:device:$deviceId"
@@ -253,8 +282,9 @@ class MdmSupabaseClient @Inject constructor() {
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "Connected to Supabase Realtime WebSocket")
+                Log.i(TAG, "⚡ Connected to Supabase Realtime WebSocket")
                 isConnected = true
+                reconnectHandler?.removeCallbacksAndMessages(null)
 
                 // 1. Join Topic realtime:device:{deviceId}
                 val joinMsg = JSONObject().apply {
@@ -324,21 +354,23 @@ class MdmSupabaseClient @Inject constructor() {
                             "PANIC_LOCKDOWN" -> {
                                 val isLocked = innerPayload?.optBoolean("is_locked", true) ?: true
                                 Log.w(TAG, "🚨 Supabase Realtime received PANIC_LOCKDOWN: $isLocked")
-                                onPanicLockdown(isLocked)
+                                callbackList.forEach { it.onPanicLockdown?.invoke(isLocked) }
                             }
                             "GRANT_EXTRA_TIME" -> {
                                 val minutes = innerPayload?.optInt("extra_minutes", 15) ?: 15
                                 Log.i(TAG, "⏳ Supabase Realtime received GRANT_EXTRA_TIME: +$minutes minutes")
-                                onExtraTime(minutes)
-                                onAdjustTime?.invoke(minutes, "Thưởng giờ chơi")
+                                callbackList.forEach {
+                                    it.onExtraTime?.invoke(minutes)
+                                    it.onAdjustTime?.invoke(minutes, "Thưởng giờ chơi")
+                                }
                             }
                             "ADJUST_SCREEN_TIME" -> {
                                 val delta = innerPayload?.optInt("delta_minutes", 15) ?: 15
                                 val reason = innerPayload?.optString("reason", "")
                                 Log.i(TAG, "⚡ Supabase Realtime received ADJUST_SCREEN_TIME: delta=$delta, reason=$reason")
-                                onAdjustTime?.invoke(delta, reason)
-                                if (delta > 0) {
-                                    onExtraTime(delta)
+                                callbackList.forEach {
+                                    it.onAdjustTime?.invoke(delta, reason)
+                                    if (delta > 0) it.onExtraTime?.invoke(delta)
                                 }
                             }
                             "REMOTE_MESSAGE" -> {
@@ -347,21 +379,21 @@ class MdmSupabaseClient @Inject constructor() {
                                 val body = innerPayload?.optString("body", "") ?: ""
                                 val template = innerPayload?.optString("template_key", "custom")
                                 Log.i(TAG, "💬 Supabase Realtime received REMOTE_MESSAGE: $title - $body")
-                                onRemoteMessage?.invoke(msgId, title, body, template)
+                                callbackList.forEach { it.onRemoteMessage?.invoke(msgId, title, body, template) }
                             }
                             "TIME_REQUEST_RESOLVED" -> {
                                 val status = innerPayload?.optString("status", "pending") ?: "pending"
                                 val granted = innerPayload?.optInt("granted_minutes", 0) ?: 0
                                 Log.i(TAG, "✅ Supabase Realtime received TIME_REQUEST_RESOLVED: $status (+$granted min)")
-                                onTimeRequestResolved?.invoke(status, granted)
+                                callbackList.forEach { it.onTimeRequestResolved?.invoke(status, granted) }
                             }
                             "DEVICE_UNPAIRED" -> {
                                 Log.w(TAG, "⚠️ Supabase Realtime received DEVICE_UNPAIRED")
-                                onDeviceUnpaired?.invoke()
+                                callbackList.forEach { it.onDeviceUnpaired?.invoke() }
                             }
                             "PAIRING_SUCCESS" -> {
                                 Log.i(TAG, "✨ Supabase Realtime received PAIRING_SUCCESS!")
-                                onPairingSuccess?.invoke()
+                                callbackList.forEach { it.onPairingSuccess?.invoke() }
                             }
                         }
                     } else if (event == "postgres_changes") {
@@ -374,7 +406,7 @@ class MdmSupabaseClient @Inject constructor() {
                                 val isClaimed = record.optBoolean("is_claimed", false)
                                 if (isClaimed) {
                                     Log.i(TAG, "✨ Supabase Postgres Changes: pairing_sessions is_claimed=true")
-                                    onPairingSuccess?.invoke()
+                                    callbackList.forEach { it.onPairingSuccess?.invoke() }
                                 }
                             } else {
                                 val isLocked = record.optBoolean("is_locked", false)
@@ -384,15 +416,15 @@ class MdmSupabaseClient @Inject constructor() {
 
                                 if (isUnpaired) {
                                     Log.w(TAG, "⚡ Supabase Postgres Changes: device is_unpaired=true")
-                                    onDeviceUnpaired?.invoke()
+                                    callbackList.forEach { it.onDeviceUnpaired?.invoke() }
                                 } else if (familyId.isNotEmpty() && familyId != "null") {
-                                    onPairingSuccess?.invoke()
+                                    callbackList.forEach { it.onPairingSuccess?.invoke() }
                                 }
 
                                 Log.w(TAG, "⚡ Supabase Postgres Changes: is_locked=$isLocked, extra_time=$extraMins")
-                                onPanicLockdown(isLocked)
-                                if (extraMins > 0) {
-                                    onExtraTime(extraMins)
+                                callbackList.forEach {
+                                    it.onPanicLockdown?.invoke(isLocked)
+                                    if (extraMins > 0) it.onExtraTime?.invoke(extraMins)
                                 }
                             }
                         }
@@ -403,15 +435,30 @@ class MdmSupabaseClient @Inject constructor() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "Supabase WebSocket failure", t)
+                Log.e(TAG, "Supabase WebSocket failure, auto-reconnecting in 5s...", t)
                 isConnected = false
+                scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "Supabase WebSocket closed: $reason")
+                Log.i(TAG, "Supabase WebSocket closed: $reason, auto-reconnecting in 5s...")
                 isConnected = false
+                scheduleReconnect()
             }
         })
+    }
+
+    private fun scheduleReconnect() {
+        val devId = currentConnectedDeviceId ?: return
+        reconnectHandler?.removeCallbacksAndMessages(null)
+        reconnectHandler = Handler(Looper.getMainLooper())
+        reconnectRunnable = Runnable {
+            if (!isConnected) {
+                Log.i(TAG, "Auto-reconnecting to Supabase Realtime for device: $devId")
+                establishWebSocket(devId)
+            }
+        }
+        reconnectHandler?.postDelayed(reconnectRunnable!!, 5000L)
     }
 
     /**
@@ -516,6 +563,8 @@ class MdmSupabaseClient @Inject constructor() {
     }
 
     fun disconnect() {
+        reconnectHandler?.removeCallbacksAndMessages(null)
+        reconnectHandler = null
         heartbeatHandler?.removeCallbacksAndMessages(null)
         heartbeatHandler = null
         webSocket?.close(1000, "Normal closure")

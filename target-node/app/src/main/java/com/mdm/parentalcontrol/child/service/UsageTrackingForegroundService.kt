@@ -51,6 +51,7 @@ class UsageTrackingForegroundService : LifecycleService() {
     private var lastTelemetryReportTime = 0L
     private var hasShown5MinWarningToday = false
     private var currentActivePackage = "Màn hình chính"
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -62,9 +63,10 @@ class UsageTrackingForegroundService : LifecycleService() {
                     ensureSupabaseConnection()
                 }
                 Intent.ACTION_SCREEN_OFF -> {
-                    Log.d(TAG, "Screen OFF: Pausing polling to conserve battery (Deep Sleep)")
+                    Log.d(TAG, "Screen OFF: Pausing usage polling, maintaining persistent background socket")
                     isScreenOn = false
                     stopAdaptivePolling()
+                    ensureSupabaseConnection()
                 }
             }
         }
@@ -74,6 +76,16 @@ class UsageTrackingForegroundService : LifecycleService() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildSilentNotification())
+
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "VFamChild::TrackingWakeLock").apply {
+                setReferenceCounted(false)
+                acquire(24 * 60 * 60 * 1000L)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error acquiring WakeLock", e)
+        }
 
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
@@ -89,6 +101,11 @@ class UsageTrackingForegroundService : LifecycleService() {
         super.onDestroy()
         unregisterReceiver(screenReceiver)
         stopAdaptivePolling()
+        wakeLock?.let {
+            if (it.isHeld) {
+                try { it.release() } catch (_: Exception) {}
+            }
+        }
         supabaseClient.disconnect()
     }
 
