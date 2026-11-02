@@ -33,6 +33,14 @@ if (-not (Test-Path $releaseDir)) {
 }
 
 if ($Target -eq "target" -or $Target -eq "all") {
+    Write-Host "Syncing Target Node version to $Version..." -ForegroundColor Cyan
+    $targetGradlePath = Join-Path $repoRoot "target-node\app\build.gradle.kts"
+    if (Test-Path $targetGradlePath) {
+        $gradleContent = Get-Content -Path $targetGradlePath -Raw
+        $gradleContent = $gradleContent -replace 'versionName\s*=\s*"[^"]+"', "versionName = `"$Version`""
+        Set-Content -Path $targetGradlePath -Value $gradleContent -NoNewline
+    }
+
     Write-Host "Building Target Node (VFam Child)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "target-node")
     
@@ -56,6 +64,14 @@ if ($Target -eq "target" -or $Target -eq "all") {
 }
 
 if ($Target -eq "admin" -or $Target -eq "all") {
+    Write-Host "Syncing Admin Node version to $Version..." -ForegroundColor Cyan
+    $adminPubspecPath = Join-Path $repoRoot "admin-node\pubspec.yaml"
+    if (Test-Path $adminPubspecPath) {
+        $pubContent = Get-Content -Path $adminPubspecPath -Raw
+        $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+9"
+        Set-Content -Path $adminPubspecPath -Value $pubContent -NoNewline
+    }
+
     Write-Host "Building Admin Node (VFam Admin)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "admin-node")
     

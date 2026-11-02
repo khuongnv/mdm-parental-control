@@ -6,9 +6,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.4";
 
 interface FcmPayload {
   device_id: string;
-  action: "PANIC_LOCKDOWN" | "GRANT_EXTRA_TIME" | "SYNC_POLICY";
+  action: "PANIC_LOCKDOWN" | "GRANT_EXTRA_TIME" | "SYNC_POLICY" | "REMOTE_MESSAGE" | "TIME_REQUEST_RESOLVED";
   is_locked?: boolean;
   extra_minutes?: number;
+  title?: string;
+  body?: string;
+  message_id?: string;
+  template_key?: string;
+  status?: string;
+  granted_minutes?: number;
 }
 
 const corsHeaders = {
@@ -164,6 +170,12 @@ serve(async (req) => {
     if (extra_minutes !== undefined) {
       dataPayload.extra_minutes = extra_minutes.toString();
     }
+    if (body.title !== undefined) dataPayload.title = body.title;
+    if (body.body !== undefined) dataPayload.body = body.body;
+    if (body.message_id !== undefined) dataPayload.message_id = body.message_id;
+    if (body.template_key !== undefined) dataPayload.template_key = body.template_key;
+    if (body.status !== undefined) dataPayload.status = body.status;
+    if (body.granted_minutes !== undefined) dataPayload.granted_minutes = body.granted_minutes.toString();
 
     // Gửi bản tin FCM HTTP v1
     const fcmUrl = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import com.mdm.parentalcontrol.child.data.local.DevicePreferences
@@ -31,6 +32,15 @@ class NotificationActionReceiver : BroadcastReceiver() {
         Log.i(TAG, "Received notification action: $action")
 
         if (action == ACTION_ACK_MESSAGE) {
+            val pendingResult = goAsync()
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val wakeLock = powerManager?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "Mdm:NotificationActionAckWakeLock"
+            )?.apply {
+                acquire(5000L) // Giữ tối đa 5 giây cho OkHttp request
+            }
+
             val msgId = intent.getStringExtra(EXTRA_MSG_ID) ?: ""
             val notifId = intent.getIntExtra(EXTRA_NOTIF_ID, 0)
             val deviceId = intent.getStringExtra(EXTRA_DEVICE_ID)?.takeIf { it.isNotEmpty() }
@@ -44,8 +54,22 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
             // 2. Gửi phản hồi ACK ngay lập tức lên Supabase
             if (deviceId.isNotEmpty() && msgId.isNotEmpty()) {
-                supabaseClient.sendAckMessage(deviceId, msgId)
-                Log.i(TAG, "Sent ACK for msgId=$msgId via notification action")
+                supabaseClient.sendAckMessage(deviceId, msgId) { ok ->
+                    Log.i(TAG, "Completed sendAckMessage in NotificationActionReceiver: success=$ok")
+                    try {
+                        if (wakeLock?.isHeld == true) wakeLock.release()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error releasing wakeLock: ${e.message}")
+                    }
+                    pendingResult.finish()
+                }
+            } else {
+                try {
+                    if (wakeLock?.isHeld == true) wakeLock.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing wakeLock: ${e.message}")
+                }
+                pendingResult.finish()
             }
 
             // 3. Phản hồi Toast cho bé

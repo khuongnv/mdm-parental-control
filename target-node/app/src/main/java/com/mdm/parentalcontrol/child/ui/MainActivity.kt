@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
+import com.mdm.parentalcontrol.child.BuildConfig
 import com.mdm.parentalcontrol.child.data.local.DevicePolicyLocalEntity
 import com.mdm.parentalcontrol.child.data.local.DevicePreferences
 import com.mdm.parentalcontrol.child.data.local.UsageDao
@@ -71,7 +73,14 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var usageDao: UsageDao
 
-    private val currentAppVersion = "1.2.4"
+    private val currentAppVersion: String get() = BuildConfig.VERSION_NAME
+    private var onNewIntentListener: ((Intent) -> Unit)? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        onNewIntentListener?.invoke(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -197,6 +206,21 @@ class MainActivity : AppCompatActivity() {
                 remoteMessageTitle = intent?.getStringExtra("SHOW_REMOTE_MESSAGE_TITLE") ?: "Tin Nhắn Từ Ba Mẹ"
                 remoteMessageBody = intent?.getStringExtra("SHOW_REMOTE_MESSAGE_BODY") ?: ""
                 showRemoteMessageDialog = true
+            }
+        }
+
+        DisposableEffect(Unit) {
+            onNewIntentListener = { newIntent ->
+                val intentMsgId = newIntent.getStringExtra("SHOW_REMOTE_MESSAGE_ID")
+                if (!intentMsgId.isNullOrEmpty()) {
+                    remoteMessageId = intentMsgId
+                    remoteMessageTitle = newIntent.getStringExtra("SHOW_REMOTE_MESSAGE_TITLE") ?: "Tin Nhắn Từ Ba Mẹ"
+                    remoteMessageBody = newIntent.getStringExtra("SHOW_REMOTE_MESSAGE_BODY") ?: ""
+                    showRemoteMessageDialog = true
+                }
+            }
+            onDispose {
+                onNewIntentListener = null
             }
         }
 
@@ -1155,7 +1179,7 @@ class MainActivity : AppCompatActivity() {
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "Phiên bản $currentAppVersion (Build 6) • GitHub Release",
+                                            text = "Phiên bản $currentAppVersion (Build ${BuildConfig.VERSION_CODE}) • GitHub Release",
                                             style = MaterialTheme.typography.bodyMedium.copy(
                                                 fontSize = 13.sp
                                             ),

@@ -9,6 +9,7 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.mdm.parentalcontrol.child.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -64,7 +65,7 @@ class GitHubReleaseUpdater @Inject constructor(
     suspend fun checkLatestRelease(
         repoOwner: String = "khuongnv",
         repoName: String = "mdm-parental-control",
-        currentVersion: String = "1.2.5"
+        currentVersion: String = BuildConfig.VERSION_NAME
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         val apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
         var conn: HttpURLConnection? = null

@@ -169,6 +169,14 @@ class MdmSupabaseService {
     // 2. Phát thông điệp Broadcast qua Realtime Channel
     try {
       final channel = client.channel('device:$deviceId');
+      channel.sendBroadcastMessage(
+        event: 'PANIC_LOCKDOWN',
+        payload: {
+          'device_id': deviceId,
+          'is_locked': isLocked,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
       channel.subscribe((status, [error]) async {
         if (status == RealtimeSubscribeStatus.subscribed) {
           await channel.sendBroadcastMessage(
@@ -184,6 +192,15 @@ class MdmSupabaseService {
     } catch (e) {
       debugPrint('⚠️ Error sending realtime broadcast: $e');
     }
+
+    // 3. Dự phòng gửi FCM Silent High-Priority Push
+    try {
+      await client.functions.invoke('send-fcm-command', body: {
+        'device_id': deviceId,
+        'action': 'PANIC_LOCKDOWN',
+        'is_locked': isLocked,
+      });
+    } catch (_) {}
   }
 
   /// Cấp thêm thời gian sử dụng nhanh (+15m, +30m, +60m)
@@ -209,6 +226,15 @@ class MdmSupabaseService {
     // 3. Phát thông điệp Broadcast
     try {
       final channel = client.channel('device:$deviceId');
+      channel.sendBroadcastMessage(
+        event: 'GRANT_EXTRA_TIME',
+        payload: {
+          'device_id': deviceId,
+          'extra_minutes': extraMinutes,
+          'total_extra_minutes': newExtra,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        },
+      );
       channel.subscribe((status, [error]) async {
         if (status == RealtimeSubscribeStatus.subscribed) {
           await channel.sendBroadcastMessage(
@@ -225,6 +251,15 @@ class MdmSupabaseService {
     } catch (e) {
       debugPrint('⚠️ Error sending extra time broadcast: $e');
     }
+
+    // 4. Dự phòng gửi FCM Silent High-Priority Push
+    try {
+      await client.functions.invoke('send-fcm-command', body: {
+        'device_id': deviceId,
+        'action': 'GRANT_EXTRA_TIME',
+        'extra_minutes': extraMinutes,
+      });
+    } catch (_) {}
   }
 
   /// Lắng nghe Presence (Online/Offline) của máy con
@@ -408,6 +443,18 @@ class MdmSupabaseService {
     } catch (e) {
       debugPrint('⚠️ Error sending remote message broadcast: $e');
     }
+
+    // 3. Dự phòng gửi FCM Silent High-Priority Push
+    try {
+      await client.functions.invoke('send-fcm-command', body: {
+        'device_id': deviceId,
+        'action': 'REMOTE_MESSAGE',
+        'title': title,
+        'body': body,
+        'message_id': messageId,
+        'template_key': templateKey ?? 'custom',
+      });
+    } catch (_) {}
   }
 
   /// Tạo mã mời Co-Admin 6 số / QR (P2-ADMIN-04)
@@ -504,18 +551,50 @@ class MdmSupabaseService {
 
     try {
       final channel = client.channel('device:$deviceId');
+      final payload = {
+        'device_id': deviceId,
+        'status': approve ? 'approved' : 'rejected',
+        'granted_minutes': approve ? grantedMinutes : 0,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      channel.sendBroadcastMessage(
+        event: 'TIME_REQUEST_RESOLVED',
+        payload: payload,
+      );
+
       channel.subscribe((status, [error]) async {
         if (status == RealtimeSubscribeStatus.subscribed) {
           await channel.sendBroadcastMessage(
             event: 'TIME_REQUEST_RESOLVED',
-            payload: {
-              'device_id': deviceId,
-              'status': approve ? 'approved' : 'rejected',
-              'granted_minutes': approve ? grantedMinutes : 0,
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            },
+            payload: payload,
           );
         }
+      });
+    } catch (_) {}
+
+    // 2. Cập nhật bảng time_requests trong DB
+    try {
+      await client
+          .from('time_requests')
+          .update({
+            'status': approve ? 'approved' : 'rejected',
+            'resolved_minutes': approve ? grantedMinutes : 0,
+            'resolved_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('device_id', deviceId)
+          .eq('status', 'pending');
+    } catch (e) {
+      debugPrint('⚠️ Error updating time_requests: $e');
+    }
+
+    // 3. Dự phòng gửi FCM
+    try {
+      await client.functions.invoke('send-fcm-command', body: {
+        'device_id': deviceId,
+        'action': 'TIME_REQUEST_RESOLVED',
+        'status': approve ? 'approved' : 'rejected',
+        'granted_minutes': approve ? grantedMinutes : 0,
       });
     } catch (_) {}
   }

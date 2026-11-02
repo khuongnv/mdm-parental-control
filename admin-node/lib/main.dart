@@ -550,24 +550,29 @@ class _DashboardTabState extends State<DashboardTab> {
 
     // 2. Broadcast events
     channel.onBroadcast(event: 'TELEMETRY_UPDATE', callback: (payload) {
+      final data = (payload['payload'] is Map) ? Map<String, dynamic>.from(payload['payload'] as Map) : payload;
       if (mounted) {
         setState(() {
-          if (payload['battery_level'] != null) {
-            batteryLevel = (payload['battery_level'] as num).toInt();
+          if (data['battery_level'] != null) {
+            batteryLevel = (data['battery_level'] as num).toInt();
           }
-          if (payload['is_charging'] != null) {
-            isCharging = payload['is_charging'] == true;
+          if (data['is_charging'] != null) {
+            isCharging = data['is_charging'] == true;
           }
-          if (payload['current_app'] != null) {
-            currentAppName = payload['current_app'] as String;
+          if (data['current_app'] != null) {
+            currentAppName = data['current_app'] as String;
+          }
+          if (data['agent_version'] != null) {
+            activeDevice?['agent_version'] = data['agent_version'];
           }
         });
       }
     });
 
     channel.onBroadcast(event: 'PANIC_LOCKDOWN', callback: (payload) {
-      if (payload['is_locked'] != null) {
-        final isLocked = payload['is_locked'] == true;
+      final data = (payload['payload'] is Map) ? Map<String, dynamic>.from(payload['payload'] as Map) : payload;
+      if (data['is_locked'] != null) {
+        final isLocked = data['is_locked'] == true;
         if (mounted) {
           setState(() => isEmergencyLocked = isLocked);
         }
@@ -580,45 +585,147 @@ class _DashboardTabState extends State<DashboardTab> {
     });
 
     channel.onBroadcast(event: 'TIME_REQUEST', callback: (payload) {
-      final reqMinutes = (payload['requested_minutes'] as num?)?.toInt() ?? 15;
-      final reason = payload['reason'] as String? ?? 'Con xin thêm giờ chơi';
-      final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
-      SystemNotificationService().showTimeRequestNotification(
-        deviceName: deviceName,
-        requestedMinutes: reqMinutes,
-        reason: reason,
-      );
-      if (mounted) {
-        _showTimeRequestDialog(payload);
-      }
+      _handleTimeRequest(payload);
     });
 
     channel.onBroadcast(event: 'ACK_MESSAGE', callback: (payload) {
-      final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
-      SystemNotificationService().showAckNotification(
-        deviceName: deviceName,
-        message: 'Dạ con nghe rồi!',
-      );
-      if (mounted) {
-        HapticFeedback.heavyImpact();
-        AppleNotification.show(
-          context,
-          title: 'Bé Đã Phản Hồi! 👍',
-          message: '$deviceName: "Dạ con nghe rồi!"',
-          icon: Icons.check_circle_rounded,
-          iconColor: AppleTheme.appleGreen,
-        );
-        ActivityHistoryService.logActivity(
-          type: ActivityType.message,
-          title: 'Bé Đã Xác Nhận Lời Nhắc',
-          subtitle: '$deviceName đã nhận và bấm "Dạ con nghe rồi!"',
-        );
-        widget.onActionLogged();
-      }
+      _handleAckMessage(payload);
     });
+
+    // 3. Postgres Changes (Dự phòng đảm bảo tin cậy 100%)
+    // 3.1. Xác nhận lời nhắc từ máy con trên bảng device_messages
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'device_messages',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'device_id',
+        value: deviceId,
+      ),
+      callback: (payload) {
+        final newRecord = payload.newRecord;
+        if (newRecord['is_acknowledged'] == true) {
+          _handleAckMessage(newRecord);
+        }
+      },
+    );
+
+    // 3.2. Yêu cầu xin thêm giờ từ máy con trên bảng time_requests
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'time_requests',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'device_id',
+        value: deviceId,
+      ),
+      callback: (payload) {
+        final newRecord = payload.newRecord;
+        if (newRecord['status'] == 'pending') {
+          _handleTimeRequest(newRecord);
+        }
+      },
+    );
+
+    // 3.3. Cập nhật trạng thái máy con trên bảng devices
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'devices',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'id',
+        value: deviceId,
+      ),
+      callback: (payload) {
+        final newRecord = payload.newRecord;
+        if (mounted) {
+          setState(() {
+            if (newRecord['battery_level'] != null) {
+              batteryLevel = (newRecord['battery_level'] as num).toInt();
+            }
+            if (newRecord['is_charging'] != null) {
+              isCharging = newRecord['is_charging'] == true;
+            }
+            if (newRecord['current_app_name'] != null) {
+              currentAppName = newRecord['current_app_name'] as String;
+            }
+            if (newRecord['agent_version'] != null) {
+              activeDevice?['agent_version'] = newRecord['agent_version'];
+            }
+          });
+        }
+      },
+    );
 
     channel.subscribe();
     _deviceRealtimeChannel = channel;
+  }
+
+  DateTime? _lastAckNotificationTime;
+  String? _lastAckMessageId;
+
+  void _handleAckMessage(Map<String, dynamic> rawPayload) {
+    final payload = (rawPayload['payload'] is Map)
+        ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
+        : rawPayload;
+    final msgId = (payload['message_id'] ?? payload['id'])?.toString();
+    final now = DateTime.now();
+    if (_lastAckMessageId == msgId && _lastAckNotificationTime != null &&
+        now.difference(_lastAckNotificationTime!).inSeconds < 3) {
+      return;
+    }
+    _lastAckMessageId = msgId;
+    _lastAckNotificationTime = now;
+
+    final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
+    SystemNotificationService().showAckNotification(
+      deviceName: deviceName,
+      message: 'Dạ con nghe rồi!',
+    );
+    if (mounted) {
+      HapticFeedback.heavyImpact();
+      AppleNotification.show(
+        context,
+        title: 'Bé Đã Phản Hồi! 👍',
+        message: '$deviceName: "Dạ con nghe rồi!"',
+        icon: Icons.check_circle_rounded,
+        iconColor: AppleTheme.appleGreen,
+      );
+      ActivityHistoryService.logActivity(
+        type: ActivityType.message,
+        title: 'Bé Đã Xác Nhận Lời Nhắc',
+        subtitle: '$deviceName đã nhận và bấm "Dạ con nghe rồi!"',
+      );
+      widget.onActionLogged();
+    }
+  }
+
+  DateTime? _lastTimeRequestNotificationTime;
+  void _handleTimeRequest(Map<String, dynamic> rawPayload) {
+    final payload = (rawPayload['payload'] is Map)
+        ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
+        : rawPayload;
+    final now = DateTime.now();
+    if (_lastTimeRequestNotificationTime != null &&
+        now.difference(_lastTimeRequestNotificationTime!).inSeconds < 3) {
+      return;
+    }
+    _lastTimeRequestNotificationTime = now;
+
+    final reqMinutes = (payload['requested_minutes'] as num?)?.toInt() ?? 15;
+    final reason = payload['reason'] as String? ?? 'Con xin thêm giờ chơi';
+    final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
+    SystemNotificationService().showTimeRequestNotification(
+      deviceName: deviceName,
+      requestedMinutes: reqMinutes,
+      reason: reason,
+    );
+    if (mounted) {
+      _showTimeRequestDialog(payload);
+    }
   }
 
   Future<void> _showPairingDialog() async {
@@ -1374,8 +1481,11 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 
   /// Nhận và xử lý yêu cầu xin thêm giờ của bé (P2-CHILD-02)
-  void _showTimeRequestDialog(Map<String, dynamic> payload) {
+  void _showTimeRequestDialog(Map<String, dynamic> rawPayload) {
     HapticFeedback.heavyImpact();
+    final payload = (rawPayload['payload'] is Map)
+        ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
+        : rawPayload;
     final reqMinutes = (payload['requested_minutes'] as num?)?.toInt() ?? 15;
     final reason = payload['reason'] as String? ?? 'Con xin thêm giờ chơi';
     final deviceId = (payload['device_id'] as String?) ?? activeDevice?['id'];
@@ -1927,6 +2037,7 @@ class _DashboardTabState extends State<DashboardTab> {
         : 'Chưa ghép nối thiết bị';
     final model = hasDevice ? (activeDevice!['model'] ?? 'Android') : 'Bấm nút [+] để ghép nối mã OTP';
     final osVersion = hasDevice ? (activeDevice!['os_version'] ?? '') : '';
+    final agentVersion = hasDevice ? (activeDevice!['agent_version'] ?? '') : '';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2000,7 +2111,9 @@ class _DashboardTabState extends State<DashboardTab> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      hasDevice ? '$model • $osVersion' : model,
+                      hasDevice
+                          ? (agentVersion.isNotEmpty ? '$model • $osVersion • v$agentVersion' : '$model • $osVersion')
+                          : model,
                       style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                     ),
                   ],
@@ -2942,7 +3055,7 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  String currentVersion = '1.3.0';
+  String currentVersion = '1.3.4';
   bool isCheckingUpdate = false;
   double? downloadProgress;
 

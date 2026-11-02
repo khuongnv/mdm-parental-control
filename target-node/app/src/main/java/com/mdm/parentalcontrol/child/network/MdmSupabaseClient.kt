@@ -70,7 +70,7 @@ class MdmSupabaseClient @Inject constructor() {
             put("p_device_name", deviceName)
             put("p_model", model)
             put("p_os_version", osVersion)
-            put("p_agent_version", "1.0.0")
+            put("p_agent_version", BuildConfig.VERSION_NAME)
         }
 
         val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
@@ -170,6 +170,7 @@ class MdmSupabaseClient @Inject constructor() {
             put("is_charging", isCharging)
             put("current_app", currentApp)
             put("current_app_name", currentApp)
+            put("agent_version", BuildConfig.VERSION_NAME)
             put("timestamp", System.currentTimeMillis())
         }
         sendBroadcast(topic, "TELEMETRY_UPDATE", broadcastPayload)
@@ -180,6 +181,7 @@ class MdmSupabaseClient @Inject constructor() {
             put("battery_level", batteryLevel)
             put("is_charging", isCharging)
             put("current_app_name", currentApp)
+            put("agent_version", BuildConfig.VERSION_NAME)
             val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("UTC")
             }
@@ -466,14 +468,20 @@ class MdmSupabaseClient @Inject constructor() {
      */
     fun sendBroadcast(topic: String, eventName: String, payload: JSONObject) {
         val socket = webSocket ?: return
+        val innerPayload = JSONObject().apply {
+            put("type", "broadcast")
+            put("event", eventName)
+            val keys = payload.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                put(key, payload.get(key))
+            }
+            put("payload", payload)
+        }
         val broadcastMsg = JSONObject().apply {
             put("topic", topic)
             put("event", "broadcast")
-            put("payload", JSONObject().apply {
-                put("type", "broadcast")
-                put("event", eventName)
-                put("payload", payload)
-            })
+            put("payload", innerPayload)
             put("ref", System.currentTimeMillis().toString())
         }
         socket.send(broadcastMsg.toString())
@@ -482,7 +490,7 @@ class MdmSupabaseClient @Inject constructor() {
     /**
      * Máy con phản hồi xác nhận (ACK) khi bé nhấn vào tin nhắn nhắc nhở của phụ huynh
      */
-    fun sendAckMessage(deviceId: String, messageId: String) {
+    fun sendAckMessage(deviceId: String, messageId: String, onComplete: ((Boolean) -> Unit)? = null) {
         val topic = "realtime:device:$deviceId"
         val payload = JSONObject().apply {
             put("message_id", messageId)
@@ -493,33 +501,44 @@ class MdmSupabaseClient @Inject constructor() {
         sendBroadcast(topic, "ACK_MESSAGE", payload)
         Log.i(TAG, "Sent ACK_MESSAGE for msgId: $messageId")
 
-        // Cập nhật trạng thái tin nhắn trong Supabase DB nếu messageId là UUID hợp lệ
-        if (messageId.contains("-")) {
-            val url = "$supabaseUrl/rest/v1/device_messages?id=eq.$messageId"
-            val updatePayload = JSONObject().apply {
-                put("is_acknowledged", true)
-                put("acknowledged_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.format(Date()))
-            }
-            val request = Request.Builder()
-                .url(url)
-                .patch(updatePayload.toString().toRequestBody("application/json".toMediaTypeOrNull()))
-                .addHeader("apikey", anonKey)
-                .addHeader("Authorization", "Bearer $anonKey")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .build()
-
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    Log.w(TAG, "Failed to update device_messages in DB: ${e.message}")
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    response.close()
-                }
-            })
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
         }
+        val nowIso = sdf.format(Date())
+
+        // 1. Cập nhật bảng device_messages (hỗ trợ cả UUID hoặc fallback theo device_id)
+        val url = if (messageId.contains("-")) {
+            "$supabaseUrl/rest/v1/device_messages?id=eq.$messageId"
+        } else {
+            "$supabaseUrl/rest/v1/device_messages?device_id=eq.$deviceId&is_acknowledged=eq.false"
+        }
+
+        val updatePayload = JSONObject().apply {
+            put("is_acknowledged", true)
+            put("acknowledged_at", nowIso)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .patch(updatePayload.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Prefer", "return=minimal")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Failed to update device_messages in DB: ${e.message}")
+                onComplete?.invoke(false)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                val success = response.isSuccessful
+                response.close()
+                Log.i(TAG, "Updated device_messages in DB: success=$success")
+                onComplete?.invoke(success)
+            }
+        })
     }
 
     /**
@@ -540,7 +559,36 @@ class MdmSupabaseClient @Inject constructor() {
         }
         sendBroadcast(topic, "TIME_REQUEST", payload)
         Log.i(TAG, "Sent TIME_REQUEST: +$minutes mins, reason=$reason")
-        onResult(true)
+
+        // Ghi nhận bản ghi vào bảng time_requests để kích hoạt Postgres Realtime trên Admin
+        val url = "$supabaseUrl/rest/v1/time_requests"
+        val postPayload = JSONObject().apply {
+            put("device_id", deviceId)
+            put("requested_minutes", minutes)
+            put("reason", reason)
+            put("status", "pending")
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .post(postPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Prefer", "return=minimal")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Failed to insert time_requests in DB: ${e.message}")
+                onResult(true) // Broadcast was already sent
+            }
+            override fun onResponse(call: Call, response: Response) {
+                response.close()
+                Log.i(TAG, "Inserted time_requests in DB: status=${response.code}")
+                onResult(true)
+            }
+        })
     }
 
     private fun startHeartbeat(ws: WebSocket) {
