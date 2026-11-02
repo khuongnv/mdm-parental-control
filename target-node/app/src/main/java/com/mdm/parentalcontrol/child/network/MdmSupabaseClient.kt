@@ -147,6 +147,19 @@ class MdmSupabaseClient @Inject constructor() {
         isCharging: Boolean,
         currentApp: String
     ) {
+        // 1. Phát Broadcast realtime tới máy phụ huynh tức thì
+        val topic = "realtime:device:$deviceId"
+        val broadcastPayload = JSONObject().apply {
+            put("device_id", deviceId)
+            put("battery_level", batteryLevel)
+            put("is_charging", isCharging)
+            put("current_app", currentApp)
+            put("current_app_name", currentApp)
+            put("timestamp", System.currentTimeMillis())
+        }
+        sendBroadcast(topic, "TELEMETRY_UPDATE", broadcastPayload)
+
+        // 2. Ghi nhận vào DB qua REST API
         val url = "$supabaseUrl/rest/v1/devices?id=eq.$deviceId"
         val payload = JSONObject().apply {
             put("battery_level", batteryLevel)
@@ -432,6 +445,34 @@ class MdmSupabaseClient @Inject constructor() {
         }
         sendBroadcast(topic, "ACK_MESSAGE", payload)
         Log.i(TAG, "Sent ACK_MESSAGE for msgId: $messageId")
+
+        // Cập nhật trạng thái tin nhắn trong Supabase DB nếu messageId là UUID hợp lệ
+        if (messageId.contains("-")) {
+            val url = "$supabaseUrl/rest/v1/device_messages?id=eq.$messageId"
+            val updatePayload = JSONObject().apply {
+                put("is_acknowledged", true)
+                put("acknowledged_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.format(Date()))
+            }
+            val request = Request.Builder()
+                .url(url)
+                .patch(updatePayload.toString().toRequestBody("application/json".toMediaTypeOrNull()))
+                .addHeader("apikey", anonKey)
+                .addHeader("Authorization", "Bearer $anonKey")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Prefer", "return=minimal")
+                .build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    Log.w(TAG, "Failed to update device_messages in DB: ${e.message}")
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    response.close()
+                }
+            })
+        }
     }
 
     /**

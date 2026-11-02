@@ -564,6 +564,26 @@ class _DashboardTabState extends State<DashboardTab> {
       }
     });
 
+    channel.onBroadcast(event: 'ACK_MESSAGE', callback: (payload) {
+      if (mounted) {
+        HapticFeedback.heavyImpact();
+        final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
+        AppleNotification.show(
+          context,
+          title: 'Bé Đã Phản Hồi! 👍',
+          message: '$deviceName: "Dạ con nghe rồi!"',
+          icon: Icons.check_circle_rounded,
+          iconColor: AppleTheme.appleGreen,
+        );
+        ActivityHistoryService.logActivity(
+          type: ActivityType.message,
+          title: 'Bé Đã Xác Nhận Lời Nhắc',
+          subtitle: '$deviceName đã nhận và bấm "Dạ con nghe rồi!"',
+        );
+        widget.onActionLogged();
+      }
+    });
+
     channel.subscribe();
     _deviceRealtimeChannel = channel;
   }

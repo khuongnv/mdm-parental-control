@@ -1598,11 +1598,11 @@ class MainActivity : AppCompatActivity() {
 
                                 Button(
                                     onClick = {
-                                        val currentId = deviceId
-                                        val msgId = remoteMessageId
-                                        if (!currentId.isNullOrEmpty() && !msgId.isNullOrEmpty()) {
-                                            supabaseClient.sendAckMessage(currentId, msgId)
-                                        }
+                                val currentId: String = (deviceId?.takeIf { it.isNotEmpty() } ?: devicePreferences.deviceId) ?: ""
+                                val msgId: String = (remoteMessageId?.takeIf { it.isNotEmpty() } ?: System.currentTimeMillis().toString())
+                                if (currentId.isNotEmpty()) {
+                                    supabaseClient.sendAckMessage(currentId, msgId)
+                                }
                                         showRemoteMessageDialog = false
                                         toastMessage = "✅ Đã phản hồi cho Ba Mẹ: Dạ con nghe rồi!"
                                         toastSuccess = true

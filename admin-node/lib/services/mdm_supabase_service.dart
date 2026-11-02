@@ -360,23 +360,48 @@ class MdmSupabaseService {
     required String body,
     String? templateKey,
   }) async {
-    final messageId = DateTime.now().millisecondsSinceEpoch.toString();
+    String messageId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    // Broadcast tới máy con qua Phoenix Realtime
+    // 1. Lưu vào bảng device_messages (để lưu vết lịch sử trong DB)
+    try {
+      final familyId = await getOrCreateFamily();
+      final inserted = await client.from('device_messages').insert({
+        'device_id': deviceId,
+        'family_id': familyId,
+        'template_key': templateKey ?? 'custom',
+        'message_text': body,
+      }).select('id').maybeSingle();
+      if (inserted != null && inserted['id'] != null) {
+        messageId = inserted['id'] as String;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error saving to device_messages: $e');
+    }
+
+    // 2. Broadcast tới máy con qua Phoenix Realtime
     try {
       final channel = client.channel('device:$deviceId');
+      final payload = {
+        'message_id': messageId,
+        'device_id': deviceId,
+        'title': title,
+        'body': body,
+        'template_key': templateKey ?? 'custom',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      // Gửi ngay nếu channel đã sẵn sàng
+      channel.sendBroadcastMessage(
+        event: 'REMOTE_MESSAGE',
+        payload: payload,
+      );
+
+      // Đăng ký callback nếu chưa kết nối xong
       channel.subscribe((status, [error]) async {
         if (status == RealtimeSubscribeStatus.subscribed) {
           await channel.sendBroadcastMessage(
             event: 'REMOTE_MESSAGE',
-            payload: {
-              'message_id': messageId,
-              'device_id': deviceId,
-              'title': title,
-              'body': body,
-              'template_key': templateKey ?? 'custom',
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            },
+            payload: payload,
           );
         }
       });
