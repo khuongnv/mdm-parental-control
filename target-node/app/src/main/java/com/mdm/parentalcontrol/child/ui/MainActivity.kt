@@ -45,6 +45,7 @@ import com.mdm.parentalcontrol.child.data.local.UsageDao
 import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
 import com.mdm.parentalcontrol.child.service.ChildNotificationHelper
+import com.mdm.parentalcontrol.child.service.UsageTrackingForegroundService
 import com.mdm.parentalcontrol.child.ui.components.*
 import com.mdm.parentalcontrol.child.ui.theme.*
 import com.mdm.parentalcontrol.child.updater.GitHubReleaseUpdater
@@ -85,6 +86,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Khởi chạy Foreground Service duy trì Telemetry và Tracking 24/7
+        startTrackingService()
+
         // 1. Đồng bộ FCM Token
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (task.isSuccessful) {
@@ -100,6 +104,45 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             ChildAppScreen()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        startTrackingService()
+        val savedId = devicePreferences.deviceId
+        if (!savedId.isNullOrEmpty()) {
+            val (batteryLevel, isCharging) = getBatteryStatus()
+            supabaseClient.updateTelemetry(savedId, batteryLevel, isCharging, "Child Agent")
+        }
+    }
+
+    private fun startTrackingService() {
+        try {
+            val serviceIntent = Intent(this, UsageTrackingForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+            Log.d("MainActivity", "🚀 Started UsageTrackingForegroundService successfully")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "❌ Failed to start UsageTrackingForegroundService: ${e.message}")
+        }
+    }
+
+    private fun getBatteryStatus(): Pair<Int, Boolean> {
+        return try {
+            val batteryStatusIntent = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = batteryStatusIntent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryStatusIntent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale) else 100
+            val status = batteryStatusIntent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val isCharging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                             status == android.os.BatteryManager.BATTERY_STATUS_FULL
+            Pair(batteryPct, isCharging)
+        } catch (e: Exception) {
+            Pair(100, false)
         }
     }
 
@@ -123,7 +166,6 @@ class MainActivity : AppCompatActivity() {
 
         // Trạng thái Xin Thêm Giờ (P2-CHILD-02)
         var showRequestTimeDialog by remember { mutableStateOf(false) }
-        var requestTimeCooldownUntil by remember { mutableStateOf(0L) }
         var selectedExtraMinutes by remember { mutableStateOf(15) }
         var selectedReason by remember { mutableStateOf("Con chưa làm xong bài tập") }
         var isSendingTimeRequest by remember { mutableStateOf(false) }
@@ -228,6 +270,8 @@ class MainActivity : AppCompatActivity() {
         LaunchedEffect(deviceId) {
             val id = deviceId
             if (!id.isNullOrEmpty()) {
+                val (batteryLevel, isCharging) = getBatteryStatus()
+                supabaseClient.updateTelemetry(id, batteryLevel, isCharging, "Child Agent")
                 supabaseClient.connectRealtime(
                     deviceId = id,
                     onPanicLockdown = { isLocked ->
@@ -299,6 +343,8 @@ class MainActivity : AppCompatActivity() {
                             isPaired = true
                             otpCode = null
                             qrToken = null
+                            val (batteryLevel, isCharging) = getBatteryStatus()
+                            supabaseClient.updateTelemetry(id, batteryLevel, isCharging, "Child Agent")
                             toastMessage = "✨ Ghép nối thành công với Phụ huynh!"
                             toastSuccess = true
                             refreshAllStatus()
@@ -1412,9 +1458,6 @@ class MainActivity : AppCompatActivity() {
 
                 // Dialog Xin Thêm Giờ Chơi (P2-CHILD-02)
                 if (showRequestTimeDialog) {
-                    val isCoolingDown = System.currentTimeMillis() < requestTimeCooldownUntil
-                    val cooldownLeftSecs = ((requestTimeCooldownUntil - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
-
                     Dialog(onDismissRequest = { if (!isSendingTimeRequest) showRequestTimeDialog = false }) {
                         Surface(
                             shape = RoundedCornerShape(20.dp),
@@ -1530,14 +1573,6 @@ class MainActivity : AppCompatActivity() {
 
                                 Spacer(modifier = Modifier.height(16.dp))
 
-                                if (isCoolingDown) {
-                                    Text(
-                                        text = "⏳ Vui lòng chờ ${cooldownLeftSecs}s trước khi gửi tiếp",
-                                        style = MaterialTheme.typography.labelSmall.copy(color = AppleOrange),
-                                        modifier = Modifier.padding(bottom = 8.dp)
-                                    )
-                                }
-
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1553,7 +1588,7 @@ class MainActivity : AppCompatActivity() {
                                     Button(
                                         onClick = {
                                             val currentId = deviceId
-                                            if (!currentId.isNullOrEmpty() && !isCoolingDown) {
+                                            if (!currentId.isNullOrEmpty()) {
                                                 isSendingTimeRequest = true
                                                 supabaseClient.sendTimeRequest(
                                                     deviceId = currentId,
@@ -1562,7 +1597,6 @@ class MainActivity : AppCompatActivity() {
                                                 ) {
                                                     isSendingTimeRequest = false
                                                     showRequestTimeDialog = false
-                                                    requestTimeCooldownUntil = System.currentTimeMillis() + 180000L
                                                     toastMessage = "✨ Đã gửi yêu cầu xin thêm ${selectedExtraMinutes}p tới Ba Mẹ!"
                                                     toastSuccess = true
                                                 }
@@ -1571,7 +1605,7 @@ class MainActivity : AppCompatActivity() {
                                         modifier = Modifier.weight(1.3f).height(44.dp),
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = AppleEmerald),
-                                        enabled = !isSendingTimeRequest && !isCoolingDown && !deviceId.isNullOrEmpty()
+                                        enabled = !isSendingTimeRequest && !deviceId.isNullOrEmpty()
                                     ) {
                                         if (isSendingTimeRequest) {
                                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)

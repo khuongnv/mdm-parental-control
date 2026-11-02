@@ -5,21 +5,49 @@ import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.UserManager
 import android.util.Log
+import com.mdm.parentalcontrol.child.service.UsageTrackingForegroundService
 
 class MdmDeviceAdminReceiver : DeviceAdminReceiver() {
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        val action = intent.action
+        Log.i(TAG, "MdmDeviceAdminReceiver onReceive: $action")
+        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            applyAntiTamperingPolicies(context)
+            startUsageTrackingService(context)
+        }
+    }
 
     override fun onEnabled(context: Context, intent: Intent) {
         super.onEnabled(context, intent)
         Log.i(TAG, "MDM Device Admin enabled")
         applyAntiTamperingPolicies(context)
+        startUsageTrackingService(context)
     }
 
     override fun onProfileProvisioningComplete(context: Context, intent: Intent) {
         super.onProfileProvisioningComplete(context, intent)
         Log.i(TAG, "MDM Device Owner provisioning complete")
         applyAntiTamperingPolicies(context)
+        startUsageTrackingService(context)
+    }
+
+    private fun startUsageTrackingService(context: Context) {
+        try {
+            val serviceIntent = Intent(context, UsageTrackingForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+            Log.i(TAG, "Started UsageTrackingForegroundService from MdmDeviceAdminReceiver")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start UsageTrackingForegroundService", e)
+        }
     }
 
     private fun applyAntiTamperingPolicies(context: Context) {
@@ -52,7 +80,7 @@ class MdmDeviceAdminReceiver : DeviceAdminReceiver() {
             dpm.addUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
 
             // 7. Tu dong cap quyen POST_NOTIFICATIONS (Android 13+)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 dpm.setPermissionGrantState(
                     admin,
                     context.packageName,

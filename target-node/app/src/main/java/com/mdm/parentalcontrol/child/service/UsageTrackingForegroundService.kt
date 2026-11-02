@@ -52,6 +52,7 @@ class UsageTrackingForegroundService : LifecycleService() {
     private var hasShown5MinWarningToday = false
     private var currentActivePackage = "Màn hình chính"
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var telemetryJob: kotlinx.coroutines.Job? = null
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -61,12 +62,14 @@ class UsageTrackingForegroundService : LifecycleService() {
                     isScreenOn = true
                     startAdaptivePolling()
                     ensureSupabaseConnection()
+                    checkAndReportTelemetry(force = true)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     Log.d(TAG, "Screen OFF: Pausing usage polling, maintaining persistent background socket")
                     isScreenOn = false
                     stopAdaptivePolling()
                     ensureSupabaseConnection()
+                    checkAndReportTelemetry(force = true)
                 }
             }
         }
@@ -94,13 +97,17 @@ class UsageTrackingForegroundService : LifecycleService() {
         registerReceiver(screenReceiver, filter)
 
         startAdaptivePolling()
+        startTelemetryReportingLoop()
         ensureSupabaseConnection()
+        checkAndReportTelemetry(force = true)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(screenReceiver)
         stopAdaptivePolling()
+        telemetryJob?.cancel()
+        telemetryJob = null
         wakeLock?.let {
             if (it.isHeld) {
                 try { it.release() } catch (_: Exception) {}
@@ -355,24 +362,59 @@ class UsageTrackingForegroundService : LifecycleService() {
         }
     }
 
-    private fun checkAndReportTelemetry() {
+    private fun getBatteryStatus(): Pair<Int, Boolean> {
+        return try {
+            val batteryIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val batteryPct = if (level >= 0 && scale > 0) {
+                (level * 100 / scale.toFloat()).toInt()
+            } else {
+                val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+            }
+            val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                             status == BatteryManager.BATTERY_STATUS_FULL
+            Pair(batteryPct.coerceIn(0, 100), isCharging)
+        } catch (e: Exception) {
+            Pair(100, false)
+        }
+    }
+
+    private fun startTelemetryReportingLoop() {
+        telemetryJob?.cancel()
+        telemetryJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try {
+                    checkAndReportTelemetry()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error in telemetry reporting loop: ${e.message}")
+                }
+                val interval = if (isScreenOn) 30000L else 60000L
+                delay(interval)
+            }
+        }
+    }
+
+    private fun checkAndReportTelemetry(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now - lastTelemetryReportTime > 30000L) { // Gửi telemetry mỗi 30 giây
+        val minInterval = if (isScreenOn) 25000L else 55000L
+        if (force || now - lastTelemetryReportTime > minInterval) {
             lastTelemetryReportTime = now
             val deviceId = devicePreferences.deviceId ?: return
-            val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-            val batteryLevel = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
-            val isCharging = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                bm?.isCharging == true
-            } else false
+            val (batteryLevel, isCharging) = getBatteryStatus()
 
             var appLabel = currentActivePackage
             try {
-                val appInfo = packageManager.getApplicationInfo(currentActivePackage, 0)
-                appLabel = packageManager.getApplicationLabel(appInfo).toString()
+                if (currentActivePackage != "Màn hình chính") {
+                    val appInfo = packageManager.getApplicationInfo(currentActivePackage, 0)
+                    appLabel = packageManager.getApplicationLabel(appInfo).toString()
+                }
             } catch (_: Exception) {}
 
             supabaseClient.updateTelemetry(deviceId, batteryLevel, isCharging, appLabel)
+            Log.i(TAG, "⚡ Reported telemetry: battery=$batteryLevel%, charging=$isCharging, app=$appLabel")
         }
     }
 

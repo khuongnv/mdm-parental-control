@@ -43,6 +43,45 @@ class MdmSupabaseClient @Inject constructor() {
     private val callbackList = java.util.concurrent.CopyOnWriteArrayList<RealtimeCallbacks>()
     private var currentConnectedDeviceId: String? = null
     private var reconnectHandler: Handler? = null
+    private var lastKnownBatteryLevel = 100
+    private var lastKnownIsCharging = false
+    private var lastKnownCurrentApp = "Màn hình chính"
+
+    /**
+     * Đồng bộ Presence (Online state & Live Telemetry) qua WebSocket Channel
+     */
+    fun trackPresence(
+        deviceId: String,
+        batteryLevel: Int = lastKnownBatteryLevel,
+        isCharging: Boolean = lastKnownIsCharging,
+        currentApp: String = lastKnownCurrentApp
+    ) {
+        lastKnownBatteryLevel = batteryLevel
+        lastKnownIsCharging = isCharging
+        lastKnownCurrentApp = currentApp
+
+        val socket = webSocket ?: return
+        val topic = "realtime:device:$deviceId"
+        val presenceMsg = JSONObject().apply {
+            put("topic", topic)
+            put("event", "presence")
+            put("payload", JSONObject().apply {
+                put("type", "track")
+                put("payload", JSONObject().apply {
+                    put("status", "online")
+                    put("device_id", deviceId)
+                    put("battery_level", batteryLevel)
+                    put("is_charging", isCharging)
+                    put("current_app", currentApp)
+                    put("current_app_name", currentApp)
+                    put("agent_version", BuildConfig.VERSION_NAME)
+                    put("timestamp", System.currentTimeMillis())
+                })
+            })
+            put("ref", System.currentTimeMillis().toString())
+        }
+        socket.send(presenceMsg.toString())
+    }
     private var reconnectRunnable: Runnable? = null
 
     private val supabaseUrl = BuildConfig.SUPABASE_URL
@@ -175,7 +214,43 @@ class MdmSupabaseClient @Inject constructor() {
         }
         sendBroadcast(topic, "TELEMETRY_UPDATE", broadcastPayload)
 
-        // 2. Ghi nhận vào DB qua REST API
+        // 2. Cập nhật Presence trên WebSocket
+        trackPresence(deviceId, batteryLevel, isCharging, currentApp)
+
+        // 3. Ghi nhận vào DB qua Supabase RPC (update_device_telemetry - SECURITY DEFINER)
+        val rpcUrl = "$supabaseUrl/rest/v1/rpc/update_device_telemetry"
+        val rpcPayload = JSONObject().apply {
+            put("p_device_id", deviceId)
+            put("p_battery_level", batteryLevel)
+            put("p_is_charging", isCharging)
+            put("p_current_app", currentApp)
+            put("p_agent_version", BuildConfig.VERSION_NAME)
+        }
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+        val rpcRequest = Request.Builder()
+            .url(rpcUrl)
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .post(rpcPayload.toString().toRequestBody(mediaType))
+            .build()
+
+        client.newCall(rpcRequest).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "RPC update_device_telemetry network error: ${e.message}")
+            }
+            override fun onResponse(call: Call, response: Response) {
+                if (!response.isSuccessful) {
+                    val err = response.body?.string()
+                    Log.w(TAG, "RPC update_device_telemetry HTTP ${response.code}: $err")
+                } else {
+                    Log.d(TAG, "RPC update_device_telemetry succeeded ($batteryLevel%, ⚡$isCharging)")
+                }
+                response.close()
+            }
+        })
+
+        // 4. Ghi nhận dự phòng trực tiếp qua REST PATCH vào bảng devices
         val url = "$supabaseUrl/rest/v1/devices?id=eq.$deviceId"
         val payload = JSONObject().apply {
             put("battery_level", batteryLevel)
@@ -186,9 +261,9 @@ class MdmSupabaseClient @Inject constructor() {
                 timeZone = TimeZone.getTimeZone("UTC")
             }
             put("last_seen_at", sdf.format(Date()))
+            put("status", "active")
             put("updated_at", sdf.format(Date()))
         }
-        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
         val requestBody = payload.toString().toRequestBody(mediaType)
 
         val request = Request.Builder()
@@ -202,10 +277,16 @@ class MdmSupabaseClient @Inject constructor() {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.w(TAG, "Failed to update telemetry: ${e.message}")
+                Log.w(TAG, "REST PATCH devices failed: ${e.message}")
             }
             override fun onResponse(call: Call, response: Response) {
-                // Silently updated
+                if (!response.isSuccessful) {
+                    val err = response.body?.string()
+                    Log.w(TAG, "REST PATCH devices HTTP ${response.code}: $err")
+                } else {
+                    Log.d(TAG, "REST PATCH devices succeeded ($batteryLevel%, ⚡$isCharging)")
+                }
+                response.close()
             }
         })
     }
@@ -322,21 +403,8 @@ class MdmSupabaseClient @Inject constructor() {
                 }
                 webSocket.send(joinMsg.toString())
 
-                // 2. Track Presence (Online state)
-                val presenceMsg = JSONObject().apply {
-                    put("topic", topic)
-                    put("event", "presence")
-                    put("payload", JSONObject().apply {
-                        put("type", "track")
-                        put("payload", JSONObject().apply {
-                            put("status", "online")
-                            put("device_id", deviceId)
-                            put("timestamp", System.currentTimeMillis())
-                        })
-                    })
-                    put("ref", "2")
-                }
-                webSocket.send(presenceMsg.toString())
+                // 2. Track Presence (Online state & Telemetry)
+                trackPresence(deviceId)
 
                 // 3. Heartbeat loop (every 25 seconds)
                 startHeartbeat(webSocket)

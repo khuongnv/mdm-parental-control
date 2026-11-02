@@ -536,12 +536,26 @@ class _DashboardTabState extends State<DashboardTab> {
           if (meta != null) {
             if (meta['battery_level'] != null) {
               batteryLevel = (meta['battery_level'] as num).toInt();
+              activeDevice?['battery_level'] = batteryLevel;
             }
             if (meta['is_charging'] != null) {
               isCharging = meta['is_charging'] == true;
+              activeDevice?['is_charging'] = isCharging;
             }
-            if (meta['current_app'] != null) {
-              currentAppName = meta['current_app'] as String;
+            final appName = meta['current_app'] ?? meta['current_app_name'];
+            if (appName != null) {
+              currentAppName = appName.toString();
+              activeDevice?['current_app_name'] = currentAppName;
+            }
+            if (meta['agent_version'] != null) {
+              activeDevice?['agent_version'] = meta['agent_version'];
+            }
+            final idx = familyDevices.indexWhere((d) => d['id'] == deviceId);
+            if (idx != -1) {
+              if (batteryLevel != null) familyDevices[idx]['battery_level'] = batteryLevel;
+              familyDevices[idx]['is_charging'] = isCharging;
+              if (currentAppName != null) familyDevices[idx]['current_app_name'] = currentAppName;
+              if (meta['agent_version'] != null) familyDevices[idx]['agent_version'] = meta['agent_version'];
             }
           }
         });
@@ -555,15 +569,26 @@ class _DashboardTabState extends State<DashboardTab> {
         setState(() {
           if (data['battery_level'] != null) {
             batteryLevel = (data['battery_level'] as num).toInt();
+            activeDevice?['battery_level'] = batteryLevel;
           }
           if (data['is_charging'] != null) {
             isCharging = data['is_charging'] == true;
+            activeDevice?['is_charging'] = isCharging;
           }
-          if (data['current_app'] != null) {
-            currentAppName = data['current_app'] as String;
+          final appName = data['current_app'] ?? data['current_app_name'];
+          if (appName != null) {
+            currentAppName = appName.toString();
+            activeDevice?['current_app_name'] = currentAppName;
           }
           if (data['agent_version'] != null) {
             activeDevice?['agent_version'] = data['agent_version'];
+          }
+          final idx = familyDevices.indexWhere((d) => d['id'] == deviceId);
+          if (idx != -1) {
+            if (batteryLevel != null) familyDevices[idx]['battery_level'] = batteryLevel;
+            familyDevices[idx]['is_charging'] = isCharging;
+            if (currentAppName != null) familyDevices[idx]['current_app_name'] = currentAppName;
+            if (data['agent_version'] != null) familyDevices[idx]['agent_version'] = data['agent_version'];
           }
         });
       }
@@ -645,15 +670,23 @@ class _DashboardTabState extends State<DashboardTab> {
           setState(() {
             if (newRecord['battery_level'] != null) {
               batteryLevel = (newRecord['battery_level'] as num).toInt();
+              activeDevice?['battery_level'] = batteryLevel;
             }
             if (newRecord['is_charging'] != null) {
               isCharging = newRecord['is_charging'] == true;
+              activeDevice?['is_charging'] = isCharging;
             }
-            if (newRecord['current_app_name'] != null) {
-              currentAppName = newRecord['current_app_name'] as String;
+            final appName = newRecord['current_app_name'] ?? newRecord['current_app'];
+            if (appName != null) {
+              currentAppName = appName.toString();
+              activeDevice?['current_app_name'] = currentAppName;
             }
             if (newRecord['agent_version'] != null) {
               activeDevice?['agent_version'] = newRecord['agent_version'];
+            }
+            final idx = familyDevices.indexWhere((d) => d['id'] == deviceId);
+            if (idx != -1) {
+              familyDevices[idx] = Map<String, dynamic>.from(familyDevices[idx])..addAll(newRecord);
             }
           });
         }
