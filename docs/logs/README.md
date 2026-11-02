@@ -4,7 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
-| 2026-11-02 | [`2026-11-02_fix_screen_off_communication_and_fcm.md`](./2026-11-02_fix_screen_off_communication_and_fcm.md) | Khắc phục mất tương tác khi khóa màn hình & Hoàn thiện kênh Firebase FCM dự phòng | `lead-architect`, `backend-sync-specialist`, `device-owner-specialist` | 🔄 Đang tiến hành |
+| 2026-11-02 | [`2026-11-02_fix_screen_off_communication_and_fcm.md`](./2026-11-02_fix_screen_off_communication_and_fcm.md) | Khắc phục mất tương tác khi khóa màn hình & Hoàn thiện kênh Firebase FCM dự phòng (v1.3.3) | `lead-architect`, `backend-sync-specialist`, `device-owner-specialist` | ✅ Hoàn thành |
 | 2026-11-02 | [`2026-11-02_system_notifications_for_both_apps.md`](./2026-11-02_system_notifications_for_both_apps.md) | Đẩy toàn bộ thông báo tương tác vào Trung tâm thông báo hệ thống (Notification Center) cho cả 2 app (v1.3.2) | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist` | ✅ Hoàn thành |
 | 2026-11-02 | [`2026-11-02_fix_bidirectional_remote_messaging_and_release_v1.3.1.md`](./2026-11-02_fix_bidirectional_remote_messaging_and_release_v1.3.1.md) | Khắc phục mất phản hồi tin nhắn hai chiều từ máy con & Phát hành bản vá v1.3.1 | `backend-sync-specialist`, `parent-ui-specialist`, `lead-architect` | ✅ Hoàn thành |
 | 2026-11-02 | [`2026-11-02_deploy_v1.3.0_phase_2.md`](./2026-11-02_deploy_v1.3.0_phase_2.md) | Phát hành phiên bản mới v1.3.0 cho cả 2 ứng dụng sau Epics Giai đoạn 2 | `lead-architect` | ✅ Hoàn thành |
