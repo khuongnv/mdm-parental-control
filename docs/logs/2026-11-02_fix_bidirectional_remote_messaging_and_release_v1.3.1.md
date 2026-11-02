@@ -5,7 +5,7 @@
 - **Yêu cầu gốc**: 
   - "hình như còn thiếu tác động backend nên tính năng chưa hoạt động"
   - "App Child thì đã nhận được thông báo từ admin, nhưng phản hồi lại thì admin chưa nhận được"
-- **Trạng thái**: [🔄 Đang tiến hành / Sắp hoàn thành Release v1.3.1]
+- **Trạng thái**: [✅ Hoàn thành]
 
 ---
 
