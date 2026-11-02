@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".MdmChildApplication"
@@ -73,6 +75,11 @@
         <!-- Silent Install Callback Receiver -->
         <receiver
             android:name=".updater.SilentInstallReceiver"
+            android:exported="false" />
+
+        <!-- Midnight Reset Receiver (Local 00:00 Auto-Reset) -->
+        <receiver
+            android:name=".receiver.MidnightResetReceiver"
             android:exported="false" />
 
         <!-- FileProvider for APK Installation Updates -->

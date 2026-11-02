@@ -107,6 +107,22 @@ class MainActivity : AppCompatActivity() {
         var todayScreenTimeMinutes by remember { mutableStateOf(0) }
         var currentPolicy by remember { mutableStateOf(DevicePolicyLocalEntity()) }
 
+        // Trạng thái đếm ngược 5 phút ghép nối (Pairing TTL - P2-CHILD-04)
+        var pairingRemainingSeconds by remember { mutableStateOf(300) }
+
+        // Trạng thái Xin Thêm Giờ (P2-CHILD-02)
+        var showRequestTimeDialog by remember { mutableStateOf(false) }
+        var requestTimeCooldownUntil by remember { mutableStateOf(0L) }
+        var selectedExtraMinutes by remember { mutableStateOf(15) }
+        var selectedReason by remember { mutableStateOf("Con chưa làm xong bài tập") }
+        var isSendingTimeRequest by remember { mutableStateOf(false) }
+
+        // Trạng thái Tin Nhắn Từ Phụ Huynh (P2-ADMIN-06 receiver)
+        var remoteMessageTitle by remember { mutableStateOf<String?>(null) }
+        var remoteMessageBody by remember { mutableStateOf<String?>(null) }
+        var remoteMessageId by remember { mutableStateOf<String?>(null) }
+        var showRemoteMessageDialog by remember { mutableStateOf(false) }
+
         // Trạng thái kiểm tra & cập nhật phiên bản
         var isCheckingUpdate by remember { mutableStateOf(false) }
         var updateInfo by remember { mutableStateOf<GitHubReleaseUpdater.ReleaseInfo?>(null) }
@@ -157,6 +173,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Đếm lùi thời gian hiệu lực mã ghép nối 5 phút (TTL 300s)
+        LaunchedEffect(otpCode) {
+            if (otpCode != null) {
+                while (true) {
+                    val created = devicePreferences.pairingCreatedAt
+                    val elapsed = if (created > 0) ((System.currentTimeMillis() - created) / 1000).toInt() else 0
+                    val left = (300 - elapsed).coerceAtLeast(0)
+                    pairingRemainingSeconds = left
+                    if (left <= 0) break
+                    delay(1000L)
+                }
+            }
+        }
+
         LaunchedEffect(Unit) {
             refreshAllStatus()
         }
@@ -185,6 +215,38 @@ class MainActivity : AppCompatActivity() {
                         toastMessage = "🎁 Ba mẹ đã thưởng thêm $mins phút sử dụng!"
                         toastSuccess = true
                         refreshAllStatus()
+                    },
+                    onAdjustTime = { delta, reason ->
+                        toastMessage = if (delta >= 0) "🎁 Ba mẹ đã thưởng thêm $delta phút sử dụng!" else "⚠️ Ba mẹ đã trừ ${-delta} phút giờ chơi!"
+                        toastSuccess = delta >= 0
+                        refreshAllStatus()
+                    },
+                    onRemoteMessage = { msgId, title, body, _ ->
+                        remoteMessageId = msgId
+                        remoteMessageTitle = title
+                        remoteMessageBody = body
+                        showRemoteMessageDialog = true
+                    },
+                    onTimeRequestResolved = { status, granted ->
+                        if (status == "approved" && granted > 0) {
+                            toastMessage = "🎉 Ba mẹ đã đồng ý cho con thêm $granted phút!"
+                            toastSuccess = true
+                        } else {
+                            toastMessage = "Ba mẹ chưa đồng ý lúc này. Con hãy nghỉ ngơi nhé!"
+                            toastSuccess = false
+                        }
+                        refreshAllStatus()
+                    },
+                    onDeviceUnpaired = {
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            devicePreferences.unpair()
+                            isPaired = false
+                            otpCode = null
+                            qrToken = null
+                            toastMessage = "Ba mẹ đã hủy quản lý thiết bị này."
+                            toastSuccess = false
+                            refreshAllStatus()
+                        }
                     },
                     onPairingSuccess = {
                         lifecycleScope.launch(Dispatchers.Main) {
@@ -418,6 +480,69 @@ class MainActivity : AppCompatActivity() {
                                                 color = if (currentPolicy.isEmergencyLockdown) AppleRed else AppleEmerald
                                             )
                                         }
+                                    }
+
+                                    // Cảnh báo thời gian còn lại 5 phút (P2-CHILD-03)
+                                    val remainingMins = (limitMins - todayScreenTimeMinutes).coerceAtLeast(0)
+                                    if (remainingMins in 1..5 && !currentPolicy.isEmergencyLockdown) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(AppleOrange.copy(alpha = 0.16f))
+                                                .border(1.dp, AppleOrange.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Warning,
+                                                contentDescription = null,
+                                                tint = AppleOrange,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column {
+                                                Text(
+                                                    text = "⚠️ SẮP HẾT THỜI GIAN (Còn $remainingMins phút)",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp),
+                                                    color = AppleOrange
+                                                )
+                                                Text(
+                                                    text = "Thiết bị sẽ tự động khóa. Hãy lưu bài tập / game và chuẩn bị tắt máy nhé!",
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Nút Xin Thêm Giờ Chơi (P2-CHILD-02)
+                                    Button(
+                                        onClick = { showRequestTimeDialog = true },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(44.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = AppleEmerald)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "🙋 Xin Ba Mẹ Thêm Giờ Chơi",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            ),
+                                            color = Color.White
+                                        )
                                     }
 
                                     Spacer(modifier = Modifier.height(12.dp))
@@ -738,22 +863,60 @@ class MainActivity : AppCompatActivity() {
 
                                             Spacer(modifier = Modifier.height(12.dp))
 
+                                            // Đồng hồ đếm ngược hiệu lực mã ghép nối (5 phút TTL - P2-CHILD-04)
+                                            val isExpired = pairingRemainingSeconds <= 0
+                                            val timerColor = when {
+                                                isExpired -> AppleRed
+                                                pairingRemainingSeconds <= 60 -> AppleOrange
+                                                else -> AppleEmerald
+                                            }
+                                            val mins = pairingRemainingSeconds / 60
+                                            val secs = pairingRemainingSeconds % 60
+
                                             Row(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(timerColor.copy(alpha = 0.15f))
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(14.dp),
-                                                    strokeWidth = 2.dp,
-                                                    color = AppleEmerald
+                                                Icon(
+                                                    imageVector = if (isExpired) Icons.Default.Warning else Icons.Default.Timer,
+                                                    contentDescription = null,
+                                                    tint = timerColor,
+                                                    modifier = Modifier.size(15.dp)
                                                 )
-                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
-                                                    text = "Đang chờ Phụ huynh xác nhận...",
+                                                    text = if (isExpired) "⚠️ Mã đã hết hạn hiệu lực (5 phút)" else "Hiệu lực trong: %02d:%02d".format(mins, secs),
                                                     style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
                                                     ),
-                                                    color = AppleEmerald
+                                                    color = timerColor
                                                 )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+
+                                            if (!isExpired) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(14.dp),
+                                                        strokeWidth = 2.dp,
+                                                        color = AppleEmerald
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Đang chờ Phụ huynh quét / nhập mã...",
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            fontSize = 12.sp
+                                                        ),
+                                                        color = AppleEmerald
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -771,7 +934,7 @@ class MainActivity : AppCompatActivity() {
                                                 model = model,
                                                 osVersion = osVersion,
                                                 onSuccess = { result ->
-                                                    devicePreferences.savePairing(result.deviceId, result.otpCode, deviceName, result.qrToken)
+                                                    devicePreferences.savePairing(result.deviceId, result.otpCode, deviceName, result.qrToken, System.currentTimeMillis())
                                                     val fcm = devicePreferences.fcmToken
                                                     if (!fcm.isNullOrEmpty()) {
                                                         supabaseClient.updateFcmToken(result.deviceId, fcm)
@@ -780,6 +943,7 @@ class MainActivity : AppCompatActivity() {
                                                         deviceId = result.deviceId
                                                         otpCode = result.otpCode
                                                         qrToken = result.qrToken
+                                                        pairingRemainingSeconds = 300
                                                         isGeneratingOtp = false
                                                         toastMessage = "✨ Đã tạo mã ghép nối mới thành công!"
                                                         toastSuccess = true
@@ -829,7 +993,7 @@ class MainActivity : AppCompatActivity() {
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = if (otpCode != null) "Tạo Lại Mã OTP / QR Khác" else "Tạo Mã Ghép Nối (OTP / QR)",
+                                                text = if (otpCode != null) (if (pairingRemainingSeconds <= 0) "Tạo Lại Mã Mới (Hết Hạn)" else "Tạo Lại Mã OTP / QR Khác") else "Tạo Mã Ghép Nối (OTP / QR)",
                                                 style = MaterialTheme.typography.bodyLarge.copy(
                                                     fontWeight = FontWeight.SemiBold,
                                                     fontSize = 15.sp
@@ -1195,6 +1359,268 @@ class MainActivity : AppCompatActivity() {
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Dialog Xin Thêm Giờ Chơi (P2-CHILD-02)
+                if (showRequestTimeDialog) {
+                    val isCoolingDown = System.currentTimeMillis() < requestTimeCooldownUntil
+                    val cooldownLeftSecs = ((requestTimeCooldownUntil - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+
+                    Dialog(onDismissRequest = { if (!isSendingTimeRequest) showRequestTimeDialog = false }) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GrayBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(CircleShape)
+                                        .background(AppleEmerald.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = AppleEmerald,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Text(
+                                    text = "Xin Thêm Giờ Chơi",
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                Text(
+                                    text = "Yêu cầu sẽ được gửi tức thì đến ứng dụng của Ba Mẹ.",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 12.sp,
+                                        textAlign = TextAlign.Center
+                                    ),
+                                    color = Gray93
+                                )
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(15, 30, 45).forEach { mins ->
+                                        val isSelected = selectedExtraMinutes == mins
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(if (isSelected) AppleEmerald else MaterialTheme.colorScheme.surfaceVariant)
+                                                .clickable { selectedExtraMinutes = mins }
+                                                .padding(vertical = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "+$mins phút",
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    fontSize = 13.sp
+                                                ),
+                                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(
+                                        "📚 Con chưa làm xong bài tập",
+                                        "🎮 Con chơi nốt trận này với bạn",
+                                        "🎥 Con xem nốt video học tập",
+                                        "💬 Con cần trao đổi bài với bạn"
+                                    ).forEach { reason ->
+                                        val isSelected = selectedReason == reason
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (isSelected) AppleEmerald.copy(alpha = 0.15f) else Color.Transparent)
+                                                .clickable { selectedReason = reason }
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = reason,
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                    fontSize = 12.5.sp
+                                                ),
+                                                color = if (isSelected) AppleEmerald else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                if (isCoolingDown) {
+                                    Text(
+                                        text = "⏳ Vui lòng chờ ${cooldownLeftSecs}s trước khi gửi tiếp",
+                                        style = MaterialTheme.typography.labelSmall.copy(color = AppleOrange),
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { showRequestTimeDialog = false },
+                                        modifier = Modifier.weight(1f).height(44.dp),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(text = "Đóng", color = Gray93)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            val currentId = deviceId
+                                            if (!currentId.isNullOrEmpty() && !isCoolingDown) {
+                                                isSendingTimeRequest = true
+                                                supabaseClient.sendTimeRequest(
+                                                    deviceId = currentId,
+                                                    minutes = selectedExtraMinutes,
+                                                    reason = selectedReason
+                                                ) {
+                                                    isSendingTimeRequest = false
+                                                    showRequestTimeDialog = false
+                                                    requestTimeCooldownUntil = System.currentTimeMillis() + 180000L
+                                                    toastMessage = "✨ Đã gửi yêu cầu xin thêm ${selectedExtraMinutes}p tới Ba Mẹ!"
+                                                    toastSuccess = true
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1.3f).height(44.dp),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = AppleEmerald),
+                                        enabled = !isSendingTimeRequest && !isCoolingDown && !deviceId.isNullOrEmpty()
+                                    ) {
+                                        if (isSendingTimeRequest) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                        } else {
+                                            Text(text = "Gửi Yêu Cầu", fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Dialog Nhận Tin Nhắn Nhắc Nhở Từ Phụ Huynh (P2-ADMIN-06 receiver)
+                if (showRemoteMessageDialog && remoteMessageTitle != null) {
+                    Dialog(onDismissRequest = {}) {
+                        Surface(
+                            shape = RoundedCornerShape(22.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, AppleEmerald),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(22.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(CircleShape)
+                                        .background(AppleEmerald.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Notifications,
+                                        contentDescription = null,
+                                        tint = AppleEmerald,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                Text(
+                                    text = remoteMessageTitle ?: "Tin Nhắn Từ Ba Mẹ",
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp,
+                                        textAlign = TextAlign.Center
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Text(
+                                    text = remoteMessageBody ?: "",
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontSize = 15.sp,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 22.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                Button(
+                                    onClick = {
+                                        val currentId = deviceId
+                                        val msgId = remoteMessageId
+                                        if (!currentId.isNullOrEmpty() && !msgId.isNullOrEmpty()) {
+                                            supabaseClient.sendAckMessage(currentId, msgId)
+                                        }
+                                        showRemoteMessageDialog = false
+                                        toastMessage = "✅ Đã phản hồi cho Ba Mẹ: Dạ con nghe rồi!"
+                                        toastSuccess = true
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AppleEmerald)
+                                ) {
+                                    Text(
+                                        text = "Dạ Con Nghe Rồi! 👍",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp
+                                        ),
+                                        color = Color.White
+                                    )
                                 }
                             }
                         }

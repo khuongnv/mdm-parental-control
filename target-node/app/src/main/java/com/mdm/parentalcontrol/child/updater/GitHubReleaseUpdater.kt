@@ -64,7 +64,7 @@ class GitHubReleaseUpdater @Inject constructor(
     suspend fun checkLatestRelease(
         repoOwner: String = "khuongnv",
         repoName: String = "mdm-parental-control",
-        currentVersion: String = "1.2.4"
+        currentVersion: String = "1.2.5"
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         val apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
         var conn: HttpURLConnection? = null

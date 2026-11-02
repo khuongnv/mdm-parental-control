@@ -11,11 +11,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
-import android.content.pm.PackageManager
-import android.content.pm.ApplicationInfo
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
@@ -47,6 +48,9 @@ class UsageTrackingForegroundService : LifecycleService() {
     private var pollingJob: Job? = null
     private var isScreenOn = true
     private var lastEventQueryTime = System.currentTimeMillis()
+    private var lastTelemetryReportTime = 0L
+    private var hasShown5MinWarningToday = false
+    private var currentActivePackage = "Màn hình chính"
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -90,7 +94,7 @@ class UsageTrackingForegroundService : LifecycleService() {
 
     /**
      * Duy trì kết nối Supabase Realtime ngầm trong Foreground Service
-     * Nhận lệnh Panic Lockdown và Extra Time ngay cả khi ứng dụng bị tắt
+     * Nhận lệnh Panic Lockdown, Thưởng/Phạt động, Tin nhắn nhắc nhở và Duyệt xin giờ
      */
     fun ensureSupabaseConnection() {
         val deviceId = devicePreferences.deviceId
@@ -122,8 +126,64 @@ class UsageTrackingForegroundService : LifecycleService() {
                         ).show()
                     }
                     lifecycleScope.launch(Dispatchers.IO) {
+                        hasShown5MinWarningToday = false
                         val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
                         usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = currentPolicy.dailyLimitMinutes + minutes, isEmergencyLockdown = false))
+                        enforceLockdown(false)
+                    }
+                },
+                onAdjustTime = { deltaMinutes, reason ->
+                    Log.i(TAG, "⚡ Foreground Service handling ADJUST_SCREEN_TIME: delta=$deltaMinutes, reason=$reason")
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        val msg = if (deltaMinutes >= 0) {
+                            "🎁 Ba mẹ đã thưởng thêm $deltaMinutes phút sử dụng!"
+                        } else {
+                            "⚠️ Ba mẹ đã trừ ${-deltaMinutes} phút giờ chơi! ${reason ?: ""}"
+                        }
+                        Toast.makeText(this@UsageTrackingForegroundService, msg, Toast.LENGTH_LONG).show()
+                    }
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+                        val newLimit = (currentPolicy.dailyLimitMinutes + deltaMinutes).coerceAtLeast(0)
+                        usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = newLimit))
+
+                        // Nếu phạt trừ giờ khiến đã vượt quota, lập tức khóa ngay
+                        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                        val totalMs = usageDao.getTotalScreenTimeMs(today) ?: 0L
+                        val totalMinutes = totalMs / (1000 * 60)
+                        if (totalMinutes >= newLimit) {
+                            enforceLockdown(true)
+                        } else {
+                            enforceLockdown(false)
+                        }
+                    }
+                },
+                onRemoteMessage = { msgId, title, body, _ ->
+                    Log.i(TAG, "💬 Foreground Service handling REMOTE_MESSAGE: $title - $body")
+                    showRemoteMessageNotification(msgId, title, body)
+                },
+                onTimeRequestResolved = { status, grantedMinutes ->
+                    Log.i(TAG, "✅ Foreground Service handling TIME_REQUEST_RESOLVED: $status (+$grantedMinutes min)")
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        if (status == "approved" && grantedMinutes > 0) {
+                            Toast.makeText(this@UsageTrackingForegroundService, "🎉 Ba mẹ đã đồng ý cho con thêm $grantedMinutes phút!", Toast.LENGTH_LONG).show()
+                        } else if (status == "rejected") {
+                            Toast.makeText(this@UsageTrackingForegroundService, "Ba mẹ chưa đồng ý lúc này. Con hãy nghỉ ngơi nhé!", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    if (status == "approved" && grantedMinutes > 0) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            hasShown5MinWarningToday = false
+                            val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+                            usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = currentPolicy.dailyLimitMinutes + grantedMinutes, isEmergencyLockdown = false))
+                            enforceLockdown(false)
+                        }
+                    }
+                },
+                onDeviceUnpaired = {
+                    Log.w(TAG, "⚠️ Foreground Service handling DEVICE_UNPAIRED: Resetting local pairing state.")
+                    devicePreferences.unpair()
+                    lifecycleScope.launch(Dispatchers.IO) {
                         enforceLockdown(false)
                     }
                 },
@@ -190,6 +250,7 @@ class UsageTrackingForegroundService : LifecycleService() {
                     usageStatsManager?.let { queryAndAggregateUsage(it, lastEventQueryTime, now) }
                     lastEventQueryTime = now
                     evaluatePoliciesAndEnforce()
+                    checkAndReportTelemetry()
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in usage polling loop", e)
                 }
@@ -216,6 +277,7 @@ class UsageTrackingForegroundService : LifecycleService() {
             when (event.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> {
                     currentPackage = event.packageName
+                    currentActivePackage = currentPackage
                     resumeTime = event.timeStamp
                     eventEntities.add(AppUsageEventEntity(packageName = currentPackage, eventType = 1, timestamp = resumeTime))
                 }
@@ -260,14 +322,75 @@ class UsageTrackingForegroundService : LifecycleService() {
         if (!dpm.isDeviceOwnerApp(packageName)) return
 
         if (policy.isEmergencyLockdown || totalMinutes >= policy.dailyLimitMinutes) {
-            Log.w(TAG, "Quota exceeded or emergency lockdown active! Enforcing package suspension.")
-            // Native DO Suspension: Icon gets grayed out, launch rejected at OS level
+            Log.w(TAG, "Quota exceeded ($totalMinutes >= ${policy.dailyLimitMinutes}) or emergency lockdown active! Enforcing suspension.")
+            enforceLockdown(true)
+        } else {
+            // Kiểm tra cảnh báo trước 5 phút
+            val remainingMins = (policy.dailyLimitMinutes - totalMinutes).toInt()
+            if (remainingMins in 1..5 && !hasShown5MinWarningToday) {
+                hasShown5MinWarningToday = true
+                showFiveMinuteWarning(remainingMins)
+            }
+        }
+    }
+
+    private fun checkAndReportTelemetry() {
+        val now = System.currentTimeMillis()
+        if (now - lastTelemetryReportTime > 30000L) { // Gửi telemetry mỗi 30 giây
+            lastTelemetryReportTime = now
+            val deviceId = devicePreferences.deviceId ?: return
+            val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            val batteryLevel = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+            val isCharging = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                bm?.isCharging == true
+            } else false
+
+            var appLabel = currentActivePackage
+            try {
+                val appInfo = packageManager.getApplicationInfo(currentActivePackage, 0)
+                appLabel = packageManager.getApplicationLabel(appInfo).toString()
+            } catch (_: Exception) {}
+
+            supabaseClient.updateTelemetry(deviceId, batteryLevel, isCharging, appLabel)
+        }
+    }
+
+    private fun showFiveMinuteWarning(minutesLeft: Int) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val builder = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("⚠️ Chú ý: Còn $minutesLeft phút sử dụng!")
+            .setContentText("Thiết bị sẽ tự động khóa sau $minutesLeft phút nữa. Con hãy lưu bài tập và chuẩn bị tắt máy nhé!")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setAutoCancel(true)
+        notificationManager.notify(ALERT_NOTIFICATION_ID, builder.build())
+    }
+
+    private fun showRemoteMessageNotification(msgId: String, title: String, body: String) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val builder = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setAutoCancel(true)
+        notificationManager.notify(msgId.hashCode(), builder.build())
+
+        // Tự động gửi ACK khi nhận được tin
+        val deviceId = devicePreferences.deviceId
+        if (!deviceId.isNullOrEmpty() && msgId.isNotEmpty()) {
+            supabaseClient.sendAckMessage(deviceId, msgId)
         }
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val fgsChannel = NotificationChannel(
                 CHANNEL_ID,
                 "Device Protection & Screen Time Service",
                 NotificationManager.IMPORTANCE_LOW
@@ -275,8 +398,18 @@ class UsageTrackingForegroundService : LifecycleService() {
                 description = "Running in background to enforce parental screen time limits."
                 setShowBadge(false)
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(fgsChannel)
+
+            val alertChannel = NotificationChannel(
+                ALERT_CHANNEL_ID,
+                "MDM Warnings & Parent Messages",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "High priority notifications for remaining time warnings and parent reminders."
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(alertChannel)
         }
     }
 
@@ -292,7 +425,9 @@ class UsageTrackingForegroundService : LifecycleService() {
 
     companion object {
         const val CHANNEL_ID = "mdm_usage_tracking_channel"
+        const val ALERT_CHANNEL_ID = "mdm_alerts_channel"
         const val NOTIFICATION_ID = 1001
+        const val ALERT_NOTIFICATION_ID = 1002
         private const val TAG = "UsageTrackingService"
     }
 }

@@ -21,3 +21,18 @@ Hệ thống sử dụng đặc quyền **Android Device Owner (DO)** để áp 
    - Nút can thiệp tức thì (Khóa khẩn cấp / Mở thêm giờ).
 
 ---
+
+## 3. Lộ Trình Phát Triển & Epics
+
+### Giai Đoạn 1: Nền Tảng Cốt Lõi (Core MDM Foundations)
+- [`EPIC_01_Device_Owner_Core_Agent.md`](./EPIC_01_Device_Owner_Core_Agent.md): Setup DO, Anti-Tampering, Zero-Bypass.
+- [`EPIC_02_Usage_Tracking_Engine.md`](./EPIC_02_Usage_Tracking_Engine.md): UsageStatsManager, Service chạy ngầm pin thấp.
+- [`EPIC_03_Policy_Enforcement_Blocking.md`](./EPIC_03_Policy_Enforcement_Blocking.md): setPackagesSuspended, setApplicationHidden.
+- [`EPIC_04_Supabase_Backend_Replacement.md`](./EPIC_04_Supabase_Backend_Replacement.md): Chuyển đổi sang Supabase BaaS, Realtime Phoenix Channels.
+- [`EPIC_05_Parent_App_Management_UI.md`](./EPIC_05_Parent_App_Management_UI.md): Giao diện Flutter và điều khiển tức thì.
+
+### Giai Đoạn 2: Logic Nghiệp Vụ & Vận Hành Đa Thiết Bị (Phase 2 Business Logic)
+- **Tổng quan kiến trúc Phase 2**: [`PHASE_2_EPICS_OVERVIEW.md`](./PHASE_2_EPICS_OVERVIEW.md)
+- **Epics Admin Node (Flutter)**: [`PHASE_2_ADMIN_NODE_EPICS.md`](./PHASE_2_ADMIN_NODE_EPICS.md) (Quản lý đa thiết bị, đổi tên, telemetry trực tiếp, hủy quản lý, mời co-admin, quy tắc ngày/tuần auto-reset 2h, gửi tin nhắn nhắc nhở).
+- **Epics Target Node (Android DO)**: [`PHASE_2_TARGET_NODE_EPICS.md`](./PHASE_2_TARGET_NODE_EPICS.md) (Thưởng/phạt động, xin thêm giờ, cảnh báo 5p + đếm ngược, đếm ngược TTL QR code 5p, local reset lúc 00:00).
+- **Epics Backend (Supabase)**: [`PHASE_2_BACKEND_SUPABASE_EPICS.md`](./PHASE_2_BACKEND_SUPABASE_EPICS.md) (Lược đồ bảng mới, RPC procedures, Realtime broadcast protocol, phân quyền RLS).

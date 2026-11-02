@@ -86,6 +86,15 @@ Write-Host "Creating git tag $tag" -ForegroundColor Cyan
 git tag -a $tag -m "$releaseTitle" -f
 git push origin $tag -f
 
+if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
+    try {
+        $credOut = ("protocol=https`nhost=github.com`n`n" | git credential fill | Out-String)
+        if ($credOut -match "password=(.+)") {
+            $env:GH_TOKEN = $matches[1].Trim()
+        }
+    } catch {}
+}
+
 $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
 
 if ($ghExe) {

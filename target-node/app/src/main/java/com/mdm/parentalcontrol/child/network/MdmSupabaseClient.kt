@@ -139,6 +139,48 @@ class MdmSupabaseClient @Inject constructor() {
     }
 
     /**
+     * Cập nhật Telemetry máy con lên Supabase: mức pin, trạng thái sạc, app đang mở
+     */
+    fun updateTelemetry(
+        deviceId: String,
+        batteryLevel: Int,
+        isCharging: Boolean,
+        currentApp: String
+    ) {
+        val url = "$supabaseUrl/rest/v1/devices?id=eq.$deviceId"
+        val payload = JSONObject().apply {
+            put("battery_level", batteryLevel)
+            put("is_charging", isCharging)
+            put("current_app_name", currentApp)
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            put("last_seen_at", sdf.format(Date()))
+            put("updated_at", sdf.format(Date()))
+        }
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+        val requestBody = payload.toString().toRequestBody(mediaType)
+
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Prefer", "return=minimal")
+            .patch(requestBody)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Failed to update telemetry: ${e.message}")
+            }
+            override fun onResponse(call: Call, response: Response) {
+                // Silently updated
+            }
+        })
+    }
+
+    /**
      * Kiểm tra trạng thái đã được ghép nối hay chưa từ bảng pairing_sessions
      */
     fun checkPairingStatus(deviceId: String, onResult: (isClaimed: Boolean) -> Unit) {
@@ -176,12 +218,16 @@ class MdmSupabaseClient @Inject constructor() {
 
     /**
      * Kết nối Supabase Realtime WebSocket (Phoenix Channels Protocol)
-     * Lắng nghe Broadcast Panic Lockdown, Grant Extra Time và Pairing Success
+     * Hỗ trợ đầy đủ các sự kiện Giai đoạn 2: Panic Lockdown, Thưởng/Phạt động, Tin nhắn phụ huynh, Duyệt xin giờ, Hủy ghép nối
      */
     fun connectRealtime(
         deviceId: String,
         onPanicLockdown: (Boolean) -> Unit,
         onExtraTime: (Int) -> Unit,
+        onAdjustTime: ((deltaMinutes: Int, reason: String?) -> Unit)? = null,
+        onRemoteMessage: ((messageId: String, title: String, body: String, templateKey: String?) -> Unit)? = null,
+        onTimeRequestResolved: ((status: String, grantedMinutes: Int) -> Unit)? = null,
+        onDeviceUnpaired: (() -> Unit)? = null,
         onPairingSuccess: (() -> Unit)? = null
     ) {
         disconnect()
@@ -197,7 +243,7 @@ class MdmSupabaseClient @Inject constructor() {
                 Log.i(TAG, "Connected to Supabase Realtime WebSocket")
                 isConnected = true
 
-                // 1. Join Topic realtime:device:{deviceId} kèm broadcast, presence và postgres_changes
+                // 1. Join Topic realtime:device:{deviceId}
                 val joinMsg = JSONObject().apply {
                     put("topic", topic)
                     put("event", "phx_join")
@@ -271,6 +317,34 @@ class MdmSupabaseClient @Inject constructor() {
                                 val minutes = innerPayload?.optInt("extra_minutes", 15) ?: 15
                                 Log.i(TAG, "⏳ Supabase Realtime received GRANT_EXTRA_TIME: +$minutes minutes")
                                 onExtraTime(minutes)
+                                onAdjustTime?.invoke(minutes, "Thưởng giờ chơi")
+                            }
+                            "ADJUST_SCREEN_TIME" -> {
+                                val delta = innerPayload?.optInt("delta_minutes", 15) ?: 15
+                                val reason = innerPayload?.optString("reason", "")
+                                Log.i(TAG, "⚡ Supabase Realtime received ADJUST_SCREEN_TIME: delta=$delta, reason=$reason")
+                                onAdjustTime?.invoke(delta, reason)
+                                if (delta > 0) {
+                                    onExtraTime(delta)
+                                }
+                            }
+                            "REMOTE_MESSAGE" -> {
+                                val msgId = innerPayload?.optString("message_id", "") ?: ""
+                                val title = innerPayload?.optString("title", "🔔 Nhắc nhở từ Ba Mẹ") ?: "🔔 Nhắc nhở từ Ba Mẹ"
+                                val body = innerPayload?.optString("body", "") ?: ""
+                                val template = innerPayload?.optString("template_key", "custom")
+                                Log.i(TAG, "💬 Supabase Realtime received REMOTE_MESSAGE: $title - $body")
+                                onRemoteMessage?.invoke(msgId, title, body, template)
+                            }
+                            "TIME_REQUEST_RESOLVED" -> {
+                                val status = innerPayload?.optString("status", "pending") ?: "pending"
+                                val granted = innerPayload?.optInt("granted_minutes", 0) ?: 0
+                                Log.i(TAG, "✅ Supabase Realtime received TIME_REQUEST_RESOLVED: $status (+$granted min)")
+                                onTimeRequestResolved?.invoke(status, granted)
+                            }
+                            "DEVICE_UNPAIRED" -> {
+                                Log.w(TAG, "⚠️ Supabase Realtime received DEVICE_UNPAIRED")
+                                onDeviceUnpaired?.invoke()
                             }
                             "PAIRING_SUCCESS" -> {
                                 Log.i(TAG, "✨ Supabase Realtime received PAIRING_SUCCESS!")
@@ -293,9 +367,15 @@ class MdmSupabaseClient @Inject constructor() {
                                 val isLocked = record.optBoolean("is_locked", false)
                                 val extraMins = record.optInt("extra_time_minutes", 0)
                                 val familyId = record.optString("family_id", "")
-                                if (familyId.isNotEmpty() && familyId != "null") {
+                                val isUnpaired = record.optBoolean("is_unpaired", false)
+
+                                if (isUnpaired) {
+                                    Log.w(TAG, "⚡ Supabase Postgres Changes: device is_unpaired=true")
+                                    onDeviceUnpaired?.invoke()
+                                } else if (familyId.isNotEmpty() && familyId != "null") {
                                     onPairingSuccess?.invoke()
                                 }
+
                                 Log.w(TAG, "⚡ Supabase Postgres Changes: is_locked=$isLocked, extra_time=$extraMins")
                                 onPanicLockdown(isLocked)
                                 if (extraMins > 0) {
@@ -319,6 +399,60 @@ class MdmSupabaseClient @Inject constructor() {
                 isConnected = false
             }
         })
+    }
+
+    /**
+     * Gửi Broadcast Event qua Supabase Realtime Phoenix WebSocket
+     */
+    fun sendBroadcast(topic: String, eventName: String, payload: JSONObject) {
+        val socket = webSocket ?: return
+        val broadcastMsg = JSONObject().apply {
+            put("topic", topic)
+            put("event", "broadcast")
+            put("payload", JSONObject().apply {
+                put("type", "broadcast")
+                put("event", eventName)
+                put("payload", payload)
+            })
+            put("ref", System.currentTimeMillis().toString())
+        }
+        socket.send(broadcastMsg.toString())
+    }
+
+    /**
+     * Máy con phản hồi xác nhận (ACK) khi bé nhấn vào tin nhắn nhắc nhở của phụ huynh
+     */
+    fun sendAckMessage(deviceId: String, messageId: String) {
+        val topic = "realtime:device:$deviceId"
+        val payload = JSONObject().apply {
+            put("message_id", messageId)
+            put("device_id", deviceId)
+            put("status", "acknowledged")
+            put("timestamp", System.currentTimeMillis())
+        }
+        sendBroadcast(topic, "ACK_MESSAGE", payload)
+        Log.i(TAG, "Sent ACK_MESSAGE for msgId: $messageId")
+    }
+
+    /**
+     * Gửi yêu cầu xin thêm thời gian sử dụng từ máy con lên cho Ba Mẹ
+     */
+    fun sendTimeRequest(
+        deviceId: String,
+        minutes: Int,
+        reason: String,
+        onResult: (Boolean) -> Unit
+    ) {
+        val topic = "realtime:device:$deviceId"
+        val payload = JSONObject().apply {
+            put("device_id", deviceId)
+            put("requested_minutes", minutes)
+            put("reason", reason)
+            put("timestamp", System.currentTimeMillis())
+        }
+        sendBroadcast(topic, "TIME_REQUEST", payload)
+        Log.i(TAG, "Sent TIME_REQUEST: +$minutes mins, reason=$reason")
+        onResult(true)
     }
 
     private fun startHeartbeat(ws: WebSocket) {

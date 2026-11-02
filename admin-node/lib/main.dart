@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/mdm_supabase_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/activity_history_service.dart';
 import 'services/github_release_updater.dart';
 import 'widgets/apple_notification.dart';
@@ -418,6 +419,7 @@ class DashboardTab extends StatefulWidget {
 class _DashboardTabState extends State<DashboardTab> {
   final MdmSupabaseService _supabaseService = MdmSupabaseService();
 
+  List<Map<String, dynamic>> familyDevices = [];
   Map<String, dynamic>? activeDevice;
   bool isEmergencyLocked = false;
   bool isOnline = true;
@@ -425,10 +427,25 @@ class _DashboardTabState extends State<DashboardTab> {
   bool isLoading = true;
   String? errorMessage;
 
+  // Live Telemetry (P2-ADMIN-02)
+  String? currentAppName;
+  int? batteryLevel;
+  bool isCharging = false;
+  int dailyLimitMinutes = 120;
+  String quotaMode = 'daily';
+
+  RealtimeChannel? _deviceRealtimeChannel;
+
   @override
   void initState() {
     super.initState();
     _loadDeviceData();
+  }
+
+  @override
+  void dispose() {
+    _deviceRealtimeChannel?.unsubscribe();
+    super.dispose();
   }
 
   Future<void> _loadDeviceData() async {
@@ -439,27 +456,27 @@ class _DashboardTabState extends State<DashboardTab> {
 
     try {
       final devices = await _supabaseService.getFamilyDevices();
-      if (devices.isNotEmpty && mounted) {
-        final dev = devices.first;
+      if (mounted) {
         setState(() {
-          activeDevice = dev;
-          isEmergencyLocked = dev['is_locked'] == true;
-          extraTimeMinutes = (dev['extra_time_minutes'] as num?)?.toInt() ?? 0;
+          familyDevices = devices;
           isLoading = false;
         });
 
-        final deviceId = dev['id'] as String;
-        _supabaseService.subscribeDevicePresence(
-          deviceId,
-          onStatusChanged: (online, meta) {
-            if (mounted) setState(() => isOnline = online);
-          },
-        );
-      } else if (mounted) {
-        setState(() {
-          activeDevice = null;
-          isLoading = false;
-        });
+        if (devices.isNotEmpty) {
+          final currentId = activeDevice?['id'];
+          final match = devices.firstWhere(
+            (d) => d['id'] == currentId,
+            orElse: () => devices.first,
+          );
+          _selectDevice(match);
+        } else {
+          setState(() {
+            activeDevice = null;
+            isOnline = false;
+            currentAppName = null;
+            batteryLevel = null;
+          });
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -469,6 +486,86 @@ class _DashboardTabState extends State<DashboardTab> {
         });
       }
     }
+  }
+
+  void _selectDevice(Map<String, dynamic> dev) {
+    setState(() {
+      activeDevice = dev;
+      isEmergencyLocked = dev['is_locked'] == true;
+      extraTimeMinutes = (dev['extra_time_minutes'] as num?)?.toInt() ?? 0;
+      currentAppName = dev['current_app_name'] as String?;
+      batteryLevel = (dev['battery_level'] as num?)?.toInt();
+      isCharging = dev['is_charging'] == true;
+      dailyLimitMinutes = (dev['daily_screen_time_limit_mins'] as num?)?.toInt() ?? 120;
+      quotaMode = (dev['rule_type'] as String?) ?? 'daily';
+    });
+
+    final deviceId = dev['id'] as String;
+    _subscribeToActiveDevice(deviceId);
+  }
+
+  void _subscribeToActiveDevice(String deviceId) {
+    _deviceRealtimeChannel?.unsubscribe();
+
+    final channel = MdmSupabaseService.client.channel('device:$deviceId');
+
+    // 1. Presence tracking
+    channel.onPresenceSync((_) {
+      final presenceList = channel.presenceState();
+      final online = presenceList.isNotEmpty;
+      Map<String, dynamic>? meta;
+      if (online && presenceList.first.presences.isNotEmpty) {
+        meta = presenceList.first.presences.first.payload;
+      }
+      if (mounted) {
+        setState(() {
+          isOnline = online;
+          if (meta != null) {
+            if (meta['battery_level'] != null) {
+              batteryLevel = (meta['battery_level'] as num).toInt();
+            }
+            if (meta['is_charging'] != null) {
+              isCharging = meta['is_charging'] == true;
+            }
+            if (meta['current_app'] != null) {
+              currentAppName = meta['current_app'] as String;
+            }
+          }
+        });
+      }
+    });
+
+    // 2. Broadcast events
+    channel.onBroadcast(event: 'TELEMETRY_UPDATE', callback: (payload) {
+      if (mounted) {
+        setState(() {
+          if (payload['battery_level'] != null) {
+            batteryLevel = (payload['battery_level'] as num).toInt();
+          }
+          if (payload['is_charging'] != null) {
+            isCharging = payload['is_charging'] == true;
+          }
+          if (payload['current_app'] != null) {
+            currentAppName = payload['current_app'] as String;
+          }
+        });
+      }
+    });
+
+    channel.onBroadcast(event: 'PANIC_LOCKDOWN', callback: (payload) {
+      if (mounted && payload['is_locked'] != null) {
+        setState(() => isEmergencyLocked = payload['is_locked'] == true);
+      }
+    });
+
+    channel.onBroadcast(event: 'TIME_REQUEST', callback: (payload) {
+      if (mounted) {
+        _showTimeRequestDialog(payload);
+      }
+    });
+
+    channel.subscribe();
+    _deviceRealtimeChannel = channel;
   }
 
   Future<void> _showPairingDialog() async {
@@ -490,7 +587,7 @@ class _DashboardTabState extends State<DashboardTab> {
     HapticFeedback.heavyImpact();
 
     final deviceId = activeDevice!['id'] as String;
-    final deviceName = activeDevice!['device_name'] ?? 'Thiết bị con';
+    final deviceName = activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con';
 
     setState(() => isEmergencyLocked = targetLock);
 
@@ -528,47 +625,813 @@ class _DashboardTabState extends State<DashboardTab> {
     }
   }
 
-  Future<void> _grantExtraTime(int minutes) async {
+  Future<void> _adjustScreenTime(int deltaMinutes, String reason) async {
     if (activeDevice == null) return;
     HapticFeedback.mediumImpact();
 
     final deviceId = activeDevice!['id'] as String;
-    final deviceName = activeDevice!['device_name'] ?? 'Thiết bị con';
+    final deviceName = activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con';
 
     setState(() {
-      extraTimeMinutes += minutes;
-      isEmergencyLocked = false;
+      extraTimeMinutes = (extraTimeMinutes + deltaMinutes).clamp(0, 9999);
+      if (deltaMinutes > 0) isEmergencyLocked = false;
     });
 
     try {
-      await _supabaseService.grantExtraTime(deviceId, minutes);
+      await _supabaseService.adjustScreenTime(deviceId, deltaMinutes, reason: reason);
+      final isBonus = deltaMinutes > 0;
       await ActivityHistoryService.logActivity(
         type: ActivityType.extraTime,
-        title: 'Thưởng Giờ Sử Dụng',
-        subtitle: 'Đã cộng thêm +$minutes phút cho $deviceName',
+        title: isBonus ? 'Thưởng Giờ Chơi' : 'Phạt Trừ Giờ Chơi',
+        subtitle: '${isBonus ? "+$deltaMinutes" : "$deltaMinutes"} phút cho $deviceName ($reason)',
       );
       widget.onActionLogged();
 
       if (mounted) {
         AppleNotification.show(
           context,
-          title: 'Thưởng Giờ Sử Dụng',
-          message: 'Đã cộng thêm +$minutes phút sử dụng cho $deviceName',
-          icon: Icons.more_time_rounded,
-          iconColor: AppleTheme.appleBlue,
+          title: isBonus ? 'Thưởng Giờ Chơi' : 'Trừ Giờ Chơi',
+          message: '${isBonus ? "+$deltaMinutes" : "$deltaMinutes"} phút cho $deviceName.',
+          icon: isBonus ? Icons.more_time_rounded : Icons.timer_off_rounded,
+          iconColor: isBonus ? AppleTheme.appleBlue : AppleTheme.appleAmber,
         );
       }
     } catch (e) {
       if (mounted) {
         AppleNotification.show(
           context,
-          title: 'Lỗi Cộng Giờ',
+          title: 'Lỗi Cập Nhật Giờ',
           message: e.toString().replaceFirst('Exception: ', ''),
           icon: Icons.error_outline_rounded,
           iconColor: AppleTheme.appleRed,
         );
       }
     }
+  }
+
+  /// Đổi tên thiết bị con (P2-ADMIN-01)
+  Future<void> _showRenameDialog() async {
+    if (activeDevice == null) return;
+    final deviceId = activeDevice!['id'] as String;
+    final currentName = activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con';
+    final controller = TextEditingController(text: currentName);
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.surfaceColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: BorderSide(color: context.borderColor, width: 0.75),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppleTheme.applePurple.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.edit_rounded, color: AppleTheme.applePurple, size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text('Đổi Tên Thiết Bị', style: AppleTypography.titleLarge),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Đặt tên gợi nhớ để phân biệt các máy trong gia đình (ví dụ: Điện thoại Bin, iPad Bon):',
+              style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              style: AppleTypography.bodyLarge.copyWith(color: context.textPrimaryColor),
+              decoration: InputDecoration(
+                hintText: 'Nhập tên mới...',
+                hintStyle: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary),
+                filled: true,
+                fillColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Hủy', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppleTheme.applePurple,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(ctx, controller.text.trim());
+              }
+            },
+            child: Text('Lưu Tên', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (newName != null && newName.isNotEmpty && mounted) {
+      try {
+        await _supabaseService.renameDevice(deviceId, newName);
+        setState(() {
+          activeDevice!['custom_name'] = newName;
+          activeDevice!['device_name'] = newName;
+          for (var d in familyDevices) {
+            if (d['id'] == deviceId) {
+              d['custom_name'] = newName;
+              d['device_name'] = newName;
+            }
+          }
+        });
+        await ActivityHistoryService.logActivity(
+          type: ActivityType.rename,
+          title: 'Đổi Tên Thiết Bị',
+          subtitle: 'Đã đổi tên máy thành "$newName"',
+        );
+        widget.onActionLogged();
+        if (mounted) {
+          AppleNotification.show(
+            context,
+            title: 'Đã Đổi Tên Thiết Bị',
+            message: 'Thiết bị đã được đổi thành "$newName"',
+            icon: Icons.check_circle_rounded,
+            iconColor: AppleTheme.applePurple,
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          AppleNotification.show(
+            context,
+            title: 'Lỗi Đổi Tên',
+            message: e.toString().replaceFirst('Exception: ', ''),
+            icon: Icons.error_outline_rounded,
+            iconColor: AppleTheme.appleRed,
+          );
+        }
+      }
+    }
+  }
+
+  /// Hủy quyền quản lý thiết bị (P2-ADMIN-03)
+  Future<void> _showUnpairDialog() async {
+    if (activeDevice == null) return;
+    final deviceId = activeDevice!['id'] as String;
+    final deviceName = activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.surfaceColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: BorderSide(color: context.borderColor, width: 0.75),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppleTheme.appleRed.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.link_off_rounded, color: AppleTheme.appleRed, size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text('Hủy Quản Lý Thiết Bị?', style: AppleTypography.titleLarge),
+          ],
+        ),
+        content: Text(
+          'Bạn có chắc chắn muốn hủy quản lý "$deviceName"?\n\nMọi hạn mức và khóa khẩn cấp sẽ được gỡ bỏ ngay lập tức, thiết bị sẽ không còn liên kết với tài khoản phụ huynh này.',
+          style: AppleTypography.bodyMedium.copyWith(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Giữ Lại', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppleTheme.appleRed,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Hủy Quản Lý', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        await _supabaseService.revokeDeviceManagement(deviceId);
+        await ActivityHistoryService.logActivity(
+          type: ActivityType.unpair,
+          title: 'Hủy Quản Lý Thiết Bị',
+          subtitle: 'Đã hủy liên kết máy $deviceName khỏi gia đình',
+        );
+        widget.onActionLogged();
+        if (mounted) {
+          AppleNotification.show(
+            context,
+            title: 'Đã Hủy Quản Lý',
+            message: 'Đã ngắt kết nối với $deviceName.',
+            icon: Icons.link_off_rounded,
+            iconColor: AppleTheme.appleRed,
+          );
+        }
+        await _loadDeviceData();
+      } catch (e) {
+        if (mounted) {
+          AppleNotification.show(
+            context,
+            title: 'Lỗi Hủy Quản Lý',
+            message: e.toString().replaceFirst('Exception: ', ''),
+            icon: Icons.error_outline_rounded,
+            iconColor: AppleTheme.appleRed,
+          );
+        }
+      }
+    }
+  }
+
+  /// Cấu hình hạn mức Ngày / Tuần (P2-ADMIN-05)
+  Future<void> _showPolicyConfigurationSheet() async {
+    if (activeDevice == null) return;
+    final deviceId = activeDevice!['id'] as String;
+    final deviceName = activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con';
+
+    int selectedDailyMins = dailyLimitMinutes;
+    String selectedRuleType = quotaMode;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final isDark = context.isDark;
+            return Container(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 28),
+              decoration: BoxDecoration(
+                color: isDark ? AppleTheme.darkSurface : AppleTheme.lightSurface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                border: Border.all(color: context.borderColor, width: 0.75),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppleTheme.textSecondary.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppleTheme.appleAmber.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.tune_rounded, color: AppleTheme.appleAmber, size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text('Cấu Hình Hạn Mức', style: AppleTypography.titleLarge),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: AppleTheme.textSecondary),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Thiết lập quy tắc giới hạn thời gian sử dụng cho $deviceName:',
+                    style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // 1. Selector Ngày / Tuần
+                  Text('CHẾ ĐỘ GIỚI HẠN', style: AppleTypography.labelSmall.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setSheetState(() => selectedRuleType = 'daily'),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(vertical: 9),
+                              decoration: BoxDecoration(
+                                color: selectedRuleType == 'daily' ? AppleTheme.appleAmber : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Theo Ngày (Mặc định)',
+                                style: AppleTypography.bodyMedium.copyWith(
+                                  fontSize: 13,
+                                  fontWeight: selectedRuleType == 'daily' ? FontWeight.w700 : FontWeight.w500,
+                                  color: selectedRuleType == 'daily' ? Colors.white : AppleTheme.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setSheetState(() => selectedRuleType = 'weekly'),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(vertical: 9),
+                              decoration: BoxDecoration(
+                                color: selectedRuleType == 'weekly' ? AppleTheme.appleAmber : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Theo Tuần',
+                                style: AppleTypography.bodyMedium.copyWith(
+                                  fontSize: 13,
+                                  fontWeight: selectedRuleType == 'weekly' ? FontWeight.w700 : FontWeight.w500,
+                                  color: selectedRuleType == 'weekly' ? Colors.white : AppleTheme.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // 2. Daily limit slider
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        selectedRuleType == 'daily' ? 'Hạn mức mỗi ngày:' : 'Hạn mức ngày trung bình:',
+                        style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      Text(
+                        '${selectedDailyMins ~/ 60}h ${selectedDailyMins % 60}m ($selectedDailyMins phút)',
+                        style: AppleTypography.titleLarge.copyWith(
+                          fontSize: 18,
+                          color: AppleTheme.appleAmber,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Slider(
+                    value: selectedDailyMins.toDouble(),
+                    min: 30,
+                    max: 480,
+                    divisions: 30,
+                    activeColor: AppleTheme.appleAmber,
+                    onChanged: (val) {
+                      setSheetState(() => selectedDailyMins = (val / 15).round() * 15);
+                    },
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // 3. Reset 00:00 note
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppleTheme.appleAmber.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppleTheme.appleAmber.withValues(alpha: 0.25), width: 0.5),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.nightlight_round, color: AppleTheme.appleAmber, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Qua 00:00:00 nửa đêm, máy con tự động chạy bộ kích hoạt Reset để khôi phục hạn mức về ${selectedDailyMins ~/ 60}h ${selectedDailyMins % 60}m và mở khóa ứng dụng (kể cả khi offline mất mạng).',
+                            style: AppleTypography.bodyMedium.copyWith(fontSize: 12.5, height: 1.35),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // 4. Save button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppleTheme.appleAmber,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        try {
+                          await _supabaseService.updateDevicePolicy(
+                            deviceId,
+                            ruleType: selectedRuleType,
+                            dailyLimitMins: selectedDailyMins,
+                          );
+                          setState(() {
+                            dailyLimitMinutes = selectedDailyMins;
+                            quotaMode = selectedRuleType;
+                            activeDevice!['daily_screen_time_limit_mins'] = selectedDailyMins;
+                          });
+                          await ActivityHistoryService.logActivity(
+                            type: ActivityType.policy,
+                            title: 'Cập Nhật Quy Tắc Giờ',
+                            subtitle: 'Hạn mức mới: ${selectedDailyMins ~/ 60}h ${selectedDailyMins % 60}m ($selectedRuleType)',
+                          );
+                          widget.onActionLogged();
+                          if (mounted) {
+                            AppleNotification.show(
+                              this.context,
+                              title: 'Đã Cập Nhật Quy Tắc',
+                              message: 'Hạn mức ${selectedDailyMins ~/ 60}h ${selectedDailyMins % 60}m đã được gửi tới $deviceName.',
+                              icon: Icons.check_circle_rounded,
+                              iconColor: AppleTheme.appleAmber,
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            AppleNotification.show(
+                              this.context,
+                              title: 'Lỗi Cập Nhật',
+                              message: e.toString().replaceFirst('Exception: ', ''),
+                              icon: Icons.error_outline_rounded,
+                              iconColor: AppleTheme.appleRed,
+                            );
+                          }
+                        }
+                      },
+                      child: Text(
+                        'Áp Dụng Quy Tắc Mới',
+                        style: AppleTypography.bodyLarge.copyWith(fontWeight: FontWeight.w700, color: Colors.white, fontSize: 15),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Gửi lời nhắc / Thông báo tức thì (P2-ADMIN-06)
+  Future<void> _showRemoteMessageSheet() async {
+    if (activeDevice == null) return;
+    final deviceId = activeDevice!['id'] as String;
+    final deviceName = activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con';
+
+    final controller = TextEditingController();
+    String? selectedPreset;
+
+    final presets = [
+      {'key': 'dinner', 'label': '🍚 Đến giờ ăn cơm rồi con ơi!'},
+      {'key': 'study', 'label': '📚 Mau tắt máy đi học bài nào!'},
+      {'key': 'bedtime', 'label': '🛏️ Đến giờ đi ngủ rồi nhé con!'},
+      {'key': 'warn_5m', 'label': '⚠️ Còn 5 phút nữa là hết giờ chơi!'},
+      {'key': 'cleanup', 'label': '🧹 Dọn dẹp phòng đồ chơi nhé con!'},
+      {'key': 'sport', 'label': '⚽ Ra ngoài vận động một chút nào!'},
+    ];
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final isDark = context.isDark;
+            return Container(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 28),
+              decoration: BoxDecoration(
+                color: isDark ? AppleTheme.darkSurface : AppleTheme.lightSurface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                border: Border.all(color: context.borderColor, width: 0.75),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppleTheme.textSecondary.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppleTheme.appleBlue.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.mark_chat_unread_rounded, color: AppleTheme.appleBlue, size: 20),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text('Gửi Lời Nhắc Tức Thì', style: AppleTypography.titleLarge),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, color: AppleTheme.textSecondary),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Thông báo sẽ hiển thị trực tiếp lên màn hình của $deviceName kèm rung chuông:',
+                    style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Presets chips
+                  Text('MẪU CÂU NHẮC NHỞ NHANH', style: AppleTypography.labelSmall.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: presets.map((p) {
+                      final isSelected = selectedPreset == p['key'];
+                      return ChoiceChip(
+                        label: Text(p['label']!, style: AppleTypography.bodyMedium.copyWith(fontSize: 12.5)),
+                        selected: isSelected,
+                        selectedColor: AppleTheme.appleBlue.withValues(alpha: 0.2),
+                        backgroundColor: isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant,
+                        labelStyle: TextStyle(
+                          color: isSelected ? AppleTheme.appleBlue : context.textPrimaryColor,
+                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                        ),
+                        side: BorderSide(
+                          color: isSelected ? AppleTheme.appleBlue : context.borderColor,
+                          width: 0.5,
+                        ),
+                        onSelected: (val) {
+                          setSheetState(() {
+                            selectedPreset = val ? p['key'] : null;
+                            if (val) {
+                              controller.text = p['label']!;
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Custom text field
+                  Text('NỘI DUNG LỜI NHẮC', style: AppleTypography.labelSmall.copyWith(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: controller,
+                    maxLines: 2,
+                    maxLength: 150,
+                    style: AppleTypography.bodyLarge.copyWith(color: context.textPrimaryColor, fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'Nhập nội dung lời nhắc muốn gửi tới con...',
+                      hintStyle: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary),
+                      filled: true,
+                      fillColor: isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.all(12),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Send button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppleTheme.appleBlue,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                      label: Text(
+                        'Gửi Lời Nhắc Tới Con',
+                        style: AppleTypography.bodyLarge.copyWith(fontWeight: FontWeight.w700, color: Colors.white, fontSize: 15),
+                      ),
+                      onPressed: () async {
+                        final text = controller.text.trim();
+                        if (text.isEmpty) return;
+                        Navigator.pop(ctx);
+                        try {
+                          await _supabaseService.sendRemoteMessage(
+                            deviceId,
+                            title: 'Lời nhắc từ Ba Mẹ',
+                            body: text,
+                            templateKey: selectedPreset,
+                          );
+                          await ActivityHistoryService.logActivity(
+                            type: ActivityType.message,
+                            title: 'Gửi Lời Nhắc Tức Thì',
+                            subtitle: 'Đã gửi tới $deviceName: "$text"',
+                          );
+                          widget.onActionLogged();
+                          if (mounted) {
+                            AppleNotification.show(
+                              this.context,
+                              title: 'Đã Gửi Lời Nhắc',
+                              message: 'Lời nhắc đã được phát tới $deviceName.',
+                              icon: Icons.check_circle_rounded,
+                              iconColor: AppleTheme.appleBlue,
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            AppleNotification.show(
+                              this.context,
+                              title: 'Lỗi Gửi Lời Nhắc',
+                              message: e.toString().replaceFirst('Exception: ', ''),
+                              icon: Icons.error_outline_rounded,
+                              iconColor: AppleTheme.appleRed,
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Nhận và xử lý yêu cầu xin thêm giờ của bé (P2-CHILD-02)
+  void _showTimeRequestDialog(Map<String, dynamic> payload) {
+    HapticFeedback.heavyImpact();
+    final reqMinutes = (payload['requested_minutes'] as num?)?.toInt() ?? 15;
+    final reason = payload['reason'] as String? ?? 'Con xin thêm giờ chơi';
+    final deviceId = (payload['device_id'] as String?) ?? activeDevice?['id'];
+    final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.surfaceColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: const BorderSide(color: AppleTheme.appleGreen, width: 1.5),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppleTheme.appleGreen.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.access_time_filled_rounded, color: AppleTheme.appleGreen, size: 22),
+            ),
+            const SizedBox(width: 10),
+            const Text('Bé Xin Thêm Giờ!', style: AppleTypography.titleLarge),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$deviceName đang xin thêm $reqMinutes phút sử dụng máy.',
+              style: AppleTypography.bodyLarge.copyWith(fontWeight: FontWeight.w600, fontSize: 15),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: context.isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.chat_bubble_outline_rounded, size: 18, color: AppleTheme.textSecondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '"$reason"',
+                      style: AppleTypography.bodyMedium.copyWith(
+                        fontStyle: FontStyle.italic,
+                        color: context.textPrimaryColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (deviceId != null) {
+                await _supabaseService.resolveTimeRequest(deviceId, approve: false);
+                await ActivityHistoryService.logActivity(
+                  type: ActivityType.timeRequest,
+                  title: 'Từ Chối Xin Giờ',
+                  subtitle: 'Đã từ chối yêu cầu +$reqMinutes phút của $deviceName',
+                );
+                widget.onActionLogged();
+              }
+            },
+            child: Text('Từ Chối', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.appleRed, fontWeight: FontWeight.w600)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppleTheme.appleGreen,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (deviceId != null) {
+                await _supabaseService.resolveTimeRequest(deviceId, approve: true, grantedMinutes: reqMinutes);
+                setState(() => extraTimeMinutes += reqMinutes);
+                await ActivityHistoryService.logActivity(
+                  type: ActivityType.timeRequest,
+                  title: 'Duyệt Xin Thêm Giờ',
+                  subtitle: 'Đã đồng ý thưởng thêm +$reqMinutes phút cho $deviceName',
+                );
+                widget.onActionLogged();
+                if (mounted) {
+                  AppleNotification.show(
+                    context,
+                    title: 'Đã Duyệt Thêm Giờ',
+                    message: 'Đã cộng thêm +$reqMinutes phút cho $deviceName.',
+                    icon: Icons.check_circle_rounded,
+                    iconColor: AppleTheme.appleGreen,
+                  );
+                }
+              }
+            },
+            child: Text('Đồng Ý (+$reqMinutes m)', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -589,12 +1452,17 @@ class _DashboardTabState extends State<DashboardTab> {
                   children: [
                     const SizedBox(height: 12),
 
-                    // 1. Header chuẩn Apple Music Large Title & Subtitle
+                    // 1. Header chuẩn Apple Music
                     _buildHeader(),
 
                     const SizedBox(height: 14),
 
-                    // 2. Signature 3-Card Quick Stats Grid (Apple Music Style)
+                    // 2. Multi-device Carousel Bar (P2-ADMIN-01)
+                    _buildDeviceSelectorBar(),
+
+                    const SizedBox(height: 14),
+
+                    // 3. Signature 3-Card Quick Stats Grid
                     _buildQuickStatsGrid(),
 
                     const SizedBox(height: 20),
@@ -604,19 +1472,19 @@ class _DashboardTabState extends State<DashboardTab> {
                       const SizedBox(height: 16),
                     ],
 
-                    // 3. Section 1: Thẻ Thiết Bị Con Đang Kết Nối
-                    _buildSectionHeader('THIẾT BỊ CON ĐANG KẾT NỐI'),
+                    // 4. Section 1: Thẻ Thiết Bị Con Đang Quản Lý & Telemetry
+                    _buildSectionHeader('THIẾT BỊ CON ĐANG CHỌN'),
                     _buildDeviceGroupCard(),
 
                     const SizedBox(height: 22),
 
-                    // 4. Section 2: Hạn Mức Sử Dụng Hôm Nay
+                    // 5. Section 2: Hạn Mức Sử Dụng Hôm Nay
                     _buildSectionHeader('HẠN MỨC SỬ DỤNG HÔM NAY'),
                     _buildQuotaGroupCard(),
 
                     const SizedBox(height: 22),
 
-                    // 5. Section 3: Điều Khiển Tức Thì
+                    // 6. Section 3: Điều Khiển Tức Thì
                     _buildSectionHeader('ĐIỀU KHIỂN THỜI GIAN THỰC'),
                     _buildControlGroupCard(),
 
@@ -652,17 +1520,195 @@ class _DashboardTabState extends State<DashboardTab> {
         ),
         const SizedBox(height: 2),
         Text(
-          'Quản lý thời gian thực và bảo vệ thiết bị con',
+          'Quản lý đa thiết bị thời gian thực và bảo vệ con',
           style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
         ),
       ],
     );
   }
 
-  /// Hàng 3 thẻ thống kê nhanh (Signature Quick Stats Pills từ Apple Music)
+  /// Thanh chọn nhanh đa thiết bị con (P2-ADMIN-01)
+  Widget _buildDeviceSelectorBar() {
+    if (familyDevices.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'DANH SÁCH MÁY CON (${familyDevices.length})',
+                style: AppleTypography.labelSmall.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppleTheme.textSecondary,
+                  letterSpacing: 0.35,
+                ),
+              ),
+              GestureDetector(
+                onTap: _showPairingDialog,
+                child: Text(
+                  '+ Ghép Nối Máy',
+                  style: AppleTypography.labelSmall.copyWith(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppleTheme.appleRed,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 72,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: familyDevices.length + 1,
+            separatorBuilder: (_, index) => const SizedBox(width: 10),
+            itemBuilder: (context, index) {
+              if (index == familyDevices.length) {
+                // Nút thêm máy
+                return InkWell(
+                  onTap: _showPairingDialog,
+                  borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    width: 76,
+                    decoration: BoxDecoration(
+                      color: context.surfaceColor,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: context.borderColor, width: 0.75),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.add_rounded, color: AppleTheme.appleRed, size: 24),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Thêm máy',
+                          style: AppleTypography.labelSmall.copyWith(fontSize: 11, color: AppleTheme.appleRed),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final dev = familyDevices[index];
+              final isSelected = activeDevice?['id'] == dev['id'];
+              final name = dev['custom_name'] ?? dev['device_name'] ?? 'Máy ${index + 1}';
+              final devBattery = (dev['battery_level'] as num?)?.toInt();
+              final devCharging = dev['is_charging'] == true;
+
+              return InkWell(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  _selectDevice(dev);
+                },
+                borderRadius: BorderRadius.circular(18),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected ? AppleTheme.appleRed.withValues(alpha: 0.12) : context.surfaceColor,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: isSelected ? AppleTheme.appleRed : context.borderColor,
+                      width: isSelected ? 1.5 : 0.75,
+                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: AppleTheme.appleRed.withValues(alpha: 0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppleTheme.appleRed.withValues(alpha: 0.2)
+                              : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.phone_android_rounded,
+                          color: isSelected ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                name,
+                                style: AppleTypography.bodyLarge.copyWith(
+                                  fontSize: 14,
+                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                                  color: isSelected ? AppleTheme.appleRed : context.textPrimaryColor,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: (isSelected ? isOnline : dev['status'] != 'offline')
+                                      ? AppleTheme.appleGreen
+                                      : AppleTheme.textSecondary,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              if (devBattery != null) ...[
+                                Text(
+                                  devCharging ? '⚡$devBattery%' : '🔋$devBattery%',
+                                  style: AppleTypography.labelSmall.copyWith(fontSize: 11, color: AppleTheme.textSecondary),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              Text(
+                                isSelected && isEmergencyLocked ? 'Đang khóa' : (isSelected ? 'Đang chọn' : 'Chạm để xem'),
+                                style: AppleTypography.labelSmall.copyWith(
+                                  fontSize: 11,
+                                  color: isSelected && isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Hàng 3 thẻ thống kê nhanh (Quick Stats Pills)
   Widget _buildQuickStatsGrid() {
-    final hasDevice = activeDevice != null;
-    final totalAllowedMins = 120 + extraTimeMinutes;
+    final totalAllowedMins = dailyLimitMinutes + extraTimeMinutes;
 
     return Row(
       children: [
@@ -671,7 +1717,7 @@ class _DashboardTabState extends State<DashboardTab> {
           child: _buildStatPill(
             icon: Icons.phone_android_rounded,
             iconColor: AppleTheme.appleRed,
-            value: hasDevice ? '1 Máy' : '0 Máy',
+            value: '${familyDevices.length} Máy',
             label: isOnline ? 'Trực tuyến' : 'Ngoại tuyến',
             onClick: _loadDeviceData,
           ),
@@ -683,8 +1729,8 @@ class _DashboardTabState extends State<DashboardTab> {
             icon: Icons.timer_outlined,
             iconColor: AppleTheme.appleAmber,
             value: '${totalAllowedMins ~/ 60}h ${totalAllowedMins % 60}m',
-            label: 'Hạn mức',
-            onClick: () {},
+            label: quotaMode == 'weekly' ? 'Hạn mức tuần' : 'Hạn mức ngày',
+            onClick: _showPolicyConfigurationSheet,
           ),
         ),
         const SizedBox(width: 10),
@@ -779,7 +1825,9 @@ class _DashboardTabState extends State<DashboardTab> {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.15) : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant),
+          color: isAccent
+              ? AppleTheme.appleRed.withValues(alpha: 0.15)
+              : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant),
           shape: BoxShape.circle,
           border: Border.all(
             color: isAccent ? AppleTheme.appleRed.withValues(alpha: 0.3) : context.borderColor,
@@ -818,9 +1866,12 @@ class _DashboardTabState extends State<DashboardTab> {
     );
   }
 
+  /// Thẻ Thiết Bị Con & Live Telemetry (P2-ADMIN-01 & P2-ADMIN-02)
   Widget _buildDeviceGroupCard() {
     final hasDevice = activeDevice != null;
-    final deviceName = hasDevice ? (activeDevice!['device_name'] ?? 'Thiết bị con') : 'Chưa ghép nối thiết bị';
+    final deviceName = hasDevice
+        ? (activeDevice!['custom_name'] ?? activeDevice!['device_name'] ?? 'Thiết bị con')
+        : 'Chưa ghép nối thiết bị';
     final model = hasDevice ? (activeDevice!['model'] ?? 'Android') : 'Bấm nút [+] để ghép nối mã OTP';
     final osVersion = hasDevice ? (activeDevice!['os_version'] ?? '') : '';
 
@@ -831,80 +1882,174 @@ class _DashboardTabState extends State<DashboardTab> {
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: context.borderColor, width: 0.75),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: isEmergencyLocked
-                  ? AppleTheme.appleRed.withValues(alpha: 0.15)
-                  : (isOnline ? AppleTheme.appleGreen.withValues(alpha: 0.15) : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant)),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              isEmergencyLocked ? Icons.lock_rounded : Icons.phone_android_rounded,
-              color: isEmergencyLocked ? AppleTheme.appleRed : (isOnline ? AppleTheme.appleGreen : AppleTheme.textSecondary),
-              size: 24,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isEmergencyLocked
+                      ? AppleTheme.appleRed.withValues(alpha: 0.15)
+                      : (isOnline
+                          ? AppleTheme.appleGreen.withValues(alpha: 0.15)
+                          : (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isEmergencyLocked ? Icons.lock_rounded : Icons.phone_android_rounded,
+                  color: isEmergencyLocked
+                      ? AppleTheme.appleRed
+                      : (isOnline ? AppleTheme.appleGreen : AppleTheme.textSecondary),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            deviceName,
+                            style: AppleTypography.bodyLarge.copyWith(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: isOnline ? AppleTheme.appleGreen : AppleTheme.textSecondary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        if (hasDevice) ...[
+                          const SizedBox(width: 4),
+                          // Nút đổi tên ✏️ (P2-ADMIN-01)
+                          InkWell(
+                            onTap: _showRenameDialog,
+                            borderRadius: BorderRadius.circular(12),
+                            child: const Padding(
+                              padding: EdgeInsets.all(4),
+                              child: Icon(Icons.edit_outlined, size: 16, color: AppleTheme.applePurple),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hasDevice ? '$model • $osVersion' : model,
+                      style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+              if (!hasDevice)
+                FilledButton.tonal(
+                  onPressed: _showPairingDialog,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppleTheme.appleRed.withValues(alpha: 0.15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  ),
+                  child: Text(
+                    'Ghép Nối',
+                    style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.appleRed, fontWeight: FontWeight.w600, fontSize: 13),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+
+          if (hasDevice) ...[
+            Divider(color: context.hairlineDividerColor, height: 24, indent: 58),
+
+            // Live Telemetry Row (P2-ADMIN-02)
+            Row(
               children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.apps_rounded, size: 16, color: AppleTheme.appleBlue),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          currentAppName != null && currentAppName!.isNotEmpty
+                              ? currentAppName!
+                              : (isOnline ? 'Đang ở màn hình chính' : 'Ngoại tuyến'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppleTypography.labelSmall.copyWith(
+                            fontSize: 12,
+                            color: currentAppName != null ? context.textPrimaryColor : AppleTheme.textSecondary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 Row(
                   children: [
-                    Flexible(
-                      child: Text(
-                        deviceName,
-                        style: AppleTypography.bodyLarge.copyWith(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    Icon(
+                      isCharging ? Icons.battery_charging_full_rounded : Icons.battery_std_rounded,
+                      size: 16,
+                      color: batteryLevel != null && batteryLevel! < 20 ? AppleTheme.appleRed : AppleTheme.appleGreen,
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: isOnline ? AppleTheme.appleGreen : AppleTheme.textSecondary,
-                        shape: BoxShape.circle,
+                    const SizedBox(width: 4),
+                    Text(
+                      batteryLevel != null ? (isCharging ? '⚡$batteryLevel%' : '$batteryLevel%') : '--%',
+                      style: AppleTypography.labelSmall.copyWith(
+                        fontSize: 12,
+                        color: batteryLevel != null && batteryLevel! < 20 ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  hasDevice ? '$model • $osVersion' : model,
-                  style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+                const SizedBox(width: 12),
+                // Nút Hủy Quản Lý (P2-ADMIN-03)
+                InkWell(
+                  onTap: _showUnpairDialog,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppleTheme.appleRed.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.link_off_rounded, size: 14, color: AppleTheme.appleRed),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hủy máy',
+                          style: AppleTypography.labelSmall.copyWith(fontSize: 11, color: AppleTheme.appleRed, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
-          ),
-          if (!hasDevice)
-            FilledButton.tonal(
-              onPressed: _showPairingDialog,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppleTheme.appleRed.withValues(alpha: 0.15),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              ),
-              child: Text(
-                'Ghép Nối',
-                style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.appleRed, fontWeight: FontWeight.w600, fontSize: 13),
-              ),
-            ),
+          ],
         ],
       ),
     );
   }
 
+  /// Thẻ Hạn Mức Quota (P2-ADMIN-05)
   Widget _buildQuotaGroupCard() {
-    final dailyLimitMins = 120;
-    final totalAllowedMins = dailyLimitMins + extraTimeMinutes;
+    final totalAllowedMins = dailyLimitMinutes + extraTimeMinutes;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -927,23 +2072,40 @@ class _DashboardTabState extends State<DashboardTab> {
                   letterSpacing: 0.35,
                 ),
               ),
-              if (extraTimeMinutes > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppleTheme.appleBlue.withValues(alpha: 0.15),
+              Row(
+                children: [
+                  if (extraTimeMinutes > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppleTheme.appleBlue.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppleTheme.appleBlue.withValues(alpha: 0.3), width: 0.5),
+                      ),
+                      child: Text(
+                        '+$extraTimeMinutes phút',
+                        style: AppleTypography.labelSmall.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppleTheme.appleBlue,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: _showPolicyConfigurationSheet,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppleTheme.appleBlue.withValues(alpha: 0.3), width: 0.5),
-                  ),
-                  child: Text(
-                    '+$extraTimeMinutes phút',
-                    style: AppleTypography.labelSmall.copyWith(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppleTheme.appleBlue,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: AppleTheme.appleAmber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.tune_rounded, size: 18, color: AppleTheme.appleAmber),
                     ),
                   ),
-                ),
+                ],
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -959,21 +2121,40 @@ class _DashboardTabState extends State<DashboardTab> {
             ),
           ),
           const SizedBox(height: 10),
-          Text(
-            isEmergencyLocked
-                ? '🚨 Thiết bị đang ở trạng thái Khóa Khẩn Cấp tầng hệ điều hành.'
-                : '🛡️ Thiết bị đang trong khung giờ an toàn và được quản lý bảo vệ.',
-            style: AppleTypography.bodyMedium.copyWith(
-              fontSize: 13,
-              color: isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.textSecondary,
-              fontWeight: isEmergencyLocked ? FontWeight.w600 : FontWeight.w400,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  isEmergencyLocked
+                      ? '🚨 Thiết bị đang ở trạng thái Khóa Khẩn Cấp.'
+                      : '🛡️ Thiết bị đang trong khung giờ an toàn (Reset 00:00).',
+                  style: AppleTypography.bodyMedium.copyWith(
+                    fontSize: 13,
+                    color: isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                    fontWeight: isEmergencyLocked ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ),
+              GestureDetector(
+                onTap: _showPolicyConfigurationSheet,
+                child: Text(
+                  'Cấu hình >',
+                  style: AppleTypography.labelSmall.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppleTheme.appleAmber,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
+  /// Thẻ Điều Khiển Tức Thì (P2-ADMIN-06 & P2-CHILD-01)
   Widget _buildControlGroupCard() {
     return Container(
       decoration: BoxDecoration(
@@ -1017,7 +2198,7 @@ class _DashboardTabState extends State<DashboardTab> {
 
           Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
 
-          // Mục 2: Thưởng thêm giờ nhanh
+          // Mục 2: Thưởng & Phạt giờ động (+/-)
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1031,12 +2212,12 @@ class _DashboardTabState extends State<DashboardTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Thưởng thêm thời gian',
+                          'Thưởng / Phạt thời gian',
                           style: AppleTypography.bodyLarge.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Cộng thêm giờ sử dụng cho con',
+                          'Cộng thêm hoặc phạt trừ giờ chơi của con',
                           style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
                         ),
                       ],
@@ -1046,14 +2227,50 @@ class _DashboardTabState extends State<DashboardTab> {
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    Expanded(child: _buildTimeChip('+15 Phút', 15)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _buildTimeChip('+30 Phút', 30)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _buildTimeChip('+1 Giờ', 60)),
+                    Expanded(child: _buildTimeChip('+15m', 15, isBonus: true)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildTimeChip('+30m', 30, isBonus: true)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildTimeChip('+1h', 60, isBonus: true)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildTimeChip('-15m', -15, isBonus: false)),
                   ],
                 ),
               ],
+            ),
+          ),
+
+          Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
+
+          // Mục 3: Gửi lời nhắc tức thì (P2-ADMIN-06)
+          InkWell(
+            onTap: _showRemoteMessageSheet,
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(22)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  _buildSmallIconBox(Icons.mark_chat_unread_rounded, AppleTheme.applePurple),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Gửi lời nhắc tức thì',
+                          style: AppleTypography.bodyLarge.copyWith(fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Ăn cơm, học bài, đi ngủ hoặc nhắc nhở tùy ý',
+                          style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: AppleTheme.textSecondary, size: 14),
+                ],
+              ),
             ),
           ),
         ],
@@ -1073,32 +2290,35 @@ class _DashboardTabState extends State<DashboardTab> {
     );
   }
 
-  Widget _buildTimeChip(String label, int minutes) {
+  Widget _buildTimeChip(String label, int minutes, {required bool isBonus}) {
     return InkWell(
-      onTap: () => _grantExtraTime(minutes),
+      onTap: () => _adjustScreenTime(minutes, isBonus ? 'Thưởng giờ' : 'Phạt trừ giờ'),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
+          color: isBonus
+              ? (context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant)
+              : AppleTheme.appleRed.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: context.borderColor, width: 0.5),
+          border: Border.all(
+            color: isBonus ? context.borderColor : AppleTheme.appleRed.withValues(alpha: 0.3),
+            width: 0.5,
+          ),
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: AppleTypography.bodyLarge.copyWith(
             fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: context.textPrimaryColor,
+            fontWeight: FontWeight.w700,
+            color: isBonus ? context.textPrimaryColor : AppleTheme.appleRed,
           ),
         ),
       ),
     );
   }
 }
-
-// ==============================================================================
 // TAB 2: LỊCH SỬ TƯƠNG TÁC (TIMELINE AUDIT LOG)
 // ==============================================================================
 
@@ -1347,6 +2567,26 @@ class _HistoryTabState extends State<HistoryTab> {
         icon = Icons.link_rounded;
         iconColor = AppleTheme.appleAmber;
         break;
+      case ActivityType.rename:
+        icon = Icons.edit_rounded;
+        iconColor = AppleTheme.applePurple;
+        break;
+      case ActivityType.unpair:
+        icon = Icons.link_off_rounded;
+        iconColor = AppleTheme.appleRed;
+        break;
+      case ActivityType.message:
+        icon = Icons.mark_chat_unread_rounded;
+        iconColor = AppleTheme.appleBlue;
+        break;
+      case ActivityType.policy:
+        icon = Icons.tune_rounded;
+        iconColor = AppleTheme.appleAmber;
+        break;
+      case ActivityType.timeRequest:
+        icon = Icons.access_time_filled_rounded;
+        iconColor = AppleTheme.appleGreen;
+        break;
       default:
         icon = Icons.check_circle_outline;
         iconColor = AppleTheme.textSecondary;
@@ -1439,7 +2679,217 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   final ParentAppUpdater _updater = ParentAppUpdater();
 
-  String currentVersion = '1.2.4';
+  Future<void> _showCreateInviteDialog() async {
+    final supabaseService = MdmSupabaseService();
+    try {
+      final invite = await supabaseService.createFamilyInvite();
+      final code = (invite['invite_code'] as String?) ?? 'FAM-0000';
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: context.surfaceColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: context.borderColor, width: 0.75),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppleTheme.applePurple.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.share_rounded, color: AppleTheme.applePurple, size: 22),
+              ),
+              const SizedBox(width: 10),
+              const Text('Mã Mời Co-Admin', style: AppleTypography.titleLarge),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Gửi mã này cho người thân để cùng quản lý các thiết bị con trong gia đình:',
+                style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: context.isDark ? AppleTheme.darkSurfaceVariant : AppleTheme.lightSurfaceVariant,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppleTheme.applePurple.withValues(alpha: 0.3), width: 1),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      code,
+                      style: AppleTypography.displayLarge.copyWith(
+                        fontSize: 32,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 4,
+                        color: AppleTheme.applePurple,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Hiệu lực trong 24 giờ',
+                      style: AppleTypography.labelSmall.copyWith(fontSize: 11, color: AppleTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Đóng', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary)),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppleTheme.applePurple,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.copy_rounded, size: 16, color: Colors.white),
+              label: Text('Sao Chép Mã', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: code));
+                Navigator.pop(ctx);
+                AppleNotification.show(
+                  context,
+                  title: 'Đã Sao Chép',
+                  message: 'Mã mời $code đã được lưu vào bộ nhớ tạm.',
+                  icon: Icons.copy_rounded,
+                  iconColor: AppleTheme.applePurple,
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        AppleNotification.show(
+          context,
+          title: 'Lỗi Tạo Mã',
+          message: e.toString().replaceFirst('Exception: ', ''),
+          icon: Icons.error_outline_rounded,
+          iconColor: AppleTheme.appleRed,
+        );
+      }
+    }
+  }
+
+  Future<void> _showJoinFamilyDialog() async {
+    final controller = TextEditingController();
+    final supabaseService = MdmSupabaseService();
+
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.surfaceColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: context.borderColor, width: 0.75),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppleTheme.appleBlue.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.group_add_rounded, color: AppleTheme.appleBlue, size: 22),
+            ),
+            const SizedBox(width: 10),
+            const Text('Tham Gia Gia Đình', style: AppleTypography.titleLarge),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Nhập mã mời 6 ký tự nhận được từ phụ huynh trưởng gia đình:',
+              style: AppleTypography.bodyMedium.copyWith(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              style: AppleTypography.titleLarge.copyWith(
+                letterSpacing: 2,
+                color: context.textPrimaryColor,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Ví dụ: FAM-8924',
+                hintStyle: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary),
+                filled: true,
+                fillColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Hủy', style: AppleTypography.bodyMedium.copyWith(color: AppleTheme.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppleTheme.appleBlue,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(ctx, controller.text.trim());
+              }
+            },
+            child: Text('Tham Gia', style: AppleTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (code != null && code.isNotEmpty && mounted) {
+      try {
+        await supabaseService.joinFamilyByCode(code);
+        if (mounted) {
+          AppleNotification.show(
+            context,
+            title: 'Tham Gia Thành Công',
+            message: 'Bạn đã là Co-Admin trong gia đình!',
+            icon: Icons.check_circle_rounded,
+            iconColor: AppleTheme.appleGreen,
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          AppleNotification.show(
+            context,
+            title: 'Lỗi Tham Gia',
+            message: e.toString().replaceFirst('Exception: ', ''),
+            icon: Icons.error_outline_rounded,
+            iconColor: AppleTheme.appleRed,
+          );
+        }
+      }
+    }
+  }
+
+  String currentVersion = '1.3.0';
   bool isCheckingUpdate = false;
   double? downloadProgress;
 
@@ -1675,6 +3125,39 @@ class _SettingsTabState extends State<SettingsTab> {
                       themeManager.setThemeMode(mode);
                       setState(() {});
                     },
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            // SECTION: GIA ĐÌNH & CO-ADMIN (P2-ADMIN-04)
+            _buildSectionTitle('QUẢN TRỊ VIÊN & CHIA SẺ GIA ĐÌNH'),
+            Container(
+              decoration: BoxDecoration(
+                color: context.surfaceColor,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: context.borderColor, width: 0.75),
+              ),
+              child: Column(
+                children: [
+                  _buildSettingsRow(
+                    icon: Icons.person_add_alt_1_rounded,
+                    iconColor: AppleTheme.applePurple,
+                    title: 'Mời phụ huynh khác (Co-Admin)',
+                    subtitle: 'Chia sẻ quyền quản lý máy con qua mã mời',
+                    onTap: _showCreateInviteDialog,
+                    trailingWidget: const Icon(Icons.arrow_forward_ios_rounded, color: AppleTheme.textSecondary, size: 14),
+                  ),
+                  Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
+                  _buildSettingsRow(
+                    icon: Icons.group_add_rounded,
+                    iconColor: AppleTheme.appleBlue,
+                    title: 'Tham gia gia đình khác',
+                    subtitle: 'Nhập mã mời từ phụ huynh khác',
+                    onTap: _showJoinFamilyDialog,
+                    trailingWidget: const Icon(Icons.arrow_forward_ios_rounded, color: AppleTheme.textSecondary, size: 14),
                   ),
                 ],
               ),

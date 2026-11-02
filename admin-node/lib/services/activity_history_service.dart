@@ -8,6 +8,11 @@ enum ActivityType {
   extraTime,
   pairing,
   sync,
+  rename,
+  unpair,
+  message,
+  policy,
+  timeRequest,
 }
 
 class ActivityRecord {
@@ -36,14 +41,20 @@ class ActivityRecord {
         'isSuccess': isSuccess,
       };
 
-  factory ActivityRecord.fromJson(Map<String, dynamic> json) => ActivityRecord(
-        id: json['id'] as String,
-        type: ActivityType.values.byName(json['type'] as String),
-        title: json['title'] as String,
-        subtitle: json['subtitle'] as String,
-        timestamp: DateTime.parse(json['timestamp'] as String),
-        isSuccess: (json['isSuccess'] as bool?) ?? true,
-      );
+  factory ActivityRecord.fromJson(Map<String, dynamic> json) {
+    ActivityType recordType = ActivityType.sync;
+    try {
+      recordType = ActivityType.values.byName(json['type'] as String);
+    } catch (_) {}
+    return ActivityRecord(
+      id: json['id'] as String,
+      type: recordType,
+      title: json['title'] as String,
+      subtitle: json['subtitle'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      isSuccess: (json['isSuccess'] as bool?) ?? true,
+    );
+  }
 }
 
 class ActivityHistoryService {

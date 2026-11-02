@@ -44,12 +44,21 @@ class DevicePreferences @Inject constructor(
         get() = prefs.getLong(KEY_PAIRED_AT, 0L)
         set(value) = prefs.edit().putLong(KEY_PAIRED_AT, value).apply()
 
-    fun savePairing(deviceId: String, otpCode: String?, deviceName: String?, qrToken: String? = null) {
+    var pairingCreatedAt: Long
+        get() = prefs.getLong(KEY_PAIRING_CREATED_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_PAIRING_CREATED_AT, value).apply()
+
+    var baseDailyLimitMinutes: Int
+        get() = prefs.getInt(KEY_BASE_DAILY_LIMIT, 120)
+        set(value) = prefs.edit().putInt(KEY_BASE_DAILY_LIMIT, value).apply()
+
+    fun savePairing(deviceId: String, otpCode: String?, deviceName: String?, qrToken: String? = null, createdAt: Long = System.currentTimeMillis()) {
         prefs.edit()
             .putString(KEY_DEVICE_ID, deviceId)
             .putString(KEY_OTP_CODE, otpCode)
             .putString(KEY_DEVICE_NAME, deviceName)
             .putString(KEY_QR_TOKEN, qrToken)
+            .putLong(KEY_PAIRING_CREATED_AT, createdAt)
             .apply()
     }
 
@@ -60,7 +69,18 @@ class DevicePreferences @Inject constructor(
             .putBoolean(KEY_IS_PAIRED, true)
             .remove(KEY_OTP_CODE)
             .remove(KEY_QR_TOKEN)
+            .remove(KEY_PAIRING_CREATED_AT)
             .putLong(KEY_PAIRED_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun unpair() {
+        prefs.edit()
+            .putBoolean(KEY_IS_PAIRED, false)
+            .remove(KEY_OTP_CODE)
+            .remove(KEY_QR_TOKEN)
+            .remove(KEY_PAIRING_CREATED_AT)
+            .remove(KEY_PAIRED_AT)
             .apply()
     }
 
@@ -77,5 +97,7 @@ class DevicePreferences @Inject constructor(
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_PAIRED_AT = "paired_at"
+        private const val KEY_PAIRING_CREATED_AT = "pairing_created_at"
+        private const val KEY_BASE_DAILY_LIMIT = "base_daily_limit"
     }
 }

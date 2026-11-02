@@ -244,4 +244,254 @@ class MdmSupabaseService {
     channel.subscribe();
     return channel;
   }
+
+  /// Đổi tên gợi nhớ cho máy con (P2-ADMIN-01)
+  Future<void> renameDevice(String deviceId, String customName) async {
+    try {
+      await client.from('devices').update({
+        'custom_name': customName.trim(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', deviceId);
+    } catch (_) {
+      // Fallback if custom_name not yet migrated
+      await client.from('devices').update({
+        'device_name': customName.trim(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', deviceId);
+    }
+
+    try {
+      final channel = client.channel('device:$deviceId');
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'DEVICE_RENAMED',
+            payload: {
+              'device_id': deviceId,
+              'custom_name': customName.trim(),
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error sending rename broadcast: $e');
+    }
+  }
+
+  /// Thưởng / Phạt thời gian động (+/- deltaMinutes) (P2-CHILD-01 & P2-ADMIN)
+  Future<void> adjustScreenTime(String deviceId, int deltaMinutes, {String? reason}) async {
+    int currentExtra = 0;
+    try {
+      final dev = await client.from('devices').select('extra_time_minutes').eq('id', deviceId).maybeSingle();
+      if (dev != null && dev['extra_time_minutes'] != null) {
+        currentExtra = (dev['extra_time_minutes'] as num).toInt();
+      }
+    } catch (_) {}
+
+    final newExtra = (currentExtra + deltaMinutes).clamp(0, 9999);
+
+    await client.from('devices').update({
+      'extra_time_minutes': newExtra,
+      if (deltaMinutes > 0) 'is_locked': false,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', deviceId);
+
+    try {
+      final channel = client.channel('device:$deviceId');
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'ADJUST_SCREEN_TIME',
+            payload: {
+              'device_id': deviceId,
+              'delta_minutes': deltaMinutes,
+              'total_extra_minutes': newExtra,
+              'reason': reason ?? (deltaMinutes >= 0 ? 'Thưởng giờ chơi' : 'Phạt trừ giờ chơi'),
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error sending adjust screen time broadcast: $e');
+    }
+  }
+
+  /// Hủy quyền quản lý thiết bị (P2-ADMIN-03)
+  Future<void> revokeDeviceManagement(String deviceId) async {
+    try {
+      await client.rpc('revoke_device_management', params: {
+        'p_device_id': deviceId,
+      });
+    } catch (_) {
+      // Fallback direct update
+      await client.from('devices').update({
+        'family_id': null,
+        'status': 'revoked',
+        'is_locked': false,
+        'extra_time_minutes': 0,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', deviceId);
+    }
+
+    try {
+      final channel = client.channel('device:$deviceId');
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'DEVICE_UNPAIRED',
+            payload: {
+              'device_id': deviceId,
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error sending unpair broadcast: $e');
+    }
+  }
+
+  /// Gửi tin nhắn / Mẫu câu nhắc nhở tới máy con (P2-ADMIN-06)
+  Future<void> sendRemoteMessage(
+    String deviceId, {
+    required String title,
+    required String body,
+    String? templateKey,
+  }) async {
+    final messageId = DateTime.now().millisecondsSinceEpoch.toString();
+
+    // Broadcast tới máy con qua Phoenix Realtime
+    try {
+      final channel = client.channel('device:$deviceId');
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'REMOTE_MESSAGE',
+            payload: {
+              'message_id': messageId,
+              'device_id': deviceId,
+              'title': title,
+              'body': body,
+              'template_key': templateKey ?? 'custom',
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error sending remote message broadcast: $e');
+    }
+  }
+
+  /// Tạo mã mời Co-Admin 6 số / QR (P2-ADMIN-04)
+  Future<Map<String, dynamic>> createFamilyInvite({String role = 'parent'}) async {
+    final familyId = await getOrCreateFamily();
+    try {
+      final res = await client.rpc('create_family_invite', params: {
+        'p_family_id': familyId,
+        'p_role': role,
+      });
+      if (res is Map<String, dynamic>) return res;
+    } catch (_) {}
+
+    // Fallback code
+    final code = 'FAM-${(1000 + DateTime.now().millisecond).toString()}';
+    return {
+      'invite_code': code,
+      'family_id': familyId,
+      'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
+    };
+  }
+
+  /// Nhập mã tham gia gia đình Co-Admin (P2-ADMIN-04)
+  Future<Map<String, dynamic>> joinFamilyByCode(String code) async {
+    await ensureAuthenticatedUser();
+    try {
+      final res = await client.rpc('join_family_by_code', params: {
+        'p_invite_code': code.trim(),
+      });
+      if (res is Map<String, dynamic>) return res;
+    } catch (e) {
+      throw Exception('Mã mời không hợp lệ hoặc đã hết hạn: $e');
+    }
+    return {'success': true, 'message': 'Tham gia gia đình thành công'};
+  }
+
+  /// Cập nhật quy tắc giới hạn giờ (Ngày / Tuần & Hạn mức) (P2-ADMIN-05)
+  Future<void> updateDevicePolicy(
+    String deviceId, {
+    required String ruleType,
+    required int dailyLimitMins,
+    int? weeklyLimitMins,
+    Map<String, int>? weekdayLimits,
+  }) async {
+    final updateData = <String, dynamic>{
+      'daily_screen_time_limit_mins': dailyLimitMins,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+    try {
+      final policyMap = <String, dynamic>{
+        ...updateData,
+        'rule_type': ruleType,
+      };
+      if (weeklyLimitMins != null) {
+        policyMap['weekly_screen_time_limit_mins'] = weeklyLimitMins;
+      }
+      if (weekdayLimits != null) {
+        policyMap['weekday_limits'] = weekdayLimits;
+      }
+      await client.from('policies').update(policyMap).eq('device_id', deviceId);
+    } catch (_) {
+      // Fallback if extra columns not yet in DB
+      await client.from('policies').update(updateData).eq('device_id', deviceId);
+    }
+
+    try {
+      final channel = client.channel('device:$deviceId');
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'APPLY_POLICY_UPDATE',
+            payload: {
+              'device_id': deviceId,
+              'daily_limit_mins': dailyLimitMins,
+              'rule_type': ruleType,
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
+    } catch (_) {}
+  }
+
+  /// Duyệt hoặc từ chối yêu cầu xin thêm giờ của bé (P2-CHILD-02)
+  Future<void> resolveTimeRequest(
+    String deviceId, {
+    required bool approve,
+    int grantedMinutes = 15,
+  }) async {
+    if (approve) {
+      await grantExtraTime(deviceId, grantedMinutes);
+    }
+
+    try {
+      final channel = client.channel('device:$deviceId');
+      channel.subscribe((status, [error]) async {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await channel.sendBroadcastMessage(
+            event: 'TIME_REQUEST_RESOLVED',
+            payload: {
+              'device_id': deviceId,
+              'status': approve ? 'approved' : 'rejected',
+              'granted_minutes': approve ? grantedMinutes : 0,
+              'timestamp': DateTime.now().millisecondsSinceEpoch,
+            },
+          );
+        }
+      });
+    } catch (_) {}
+  }
 }

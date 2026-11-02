@@ -17,8 +17,8 @@ android {
         applicationId = "vn.hanoi.khuongnv.vfam.child"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.2.4"
+        versionCode = 8
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
