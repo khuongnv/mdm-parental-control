@@ -35,7 +35,14 @@ if (-not (Test-Path $releaseDir)) {
 if ($Target -eq "target" -or $Target -eq "all") {
     Write-Host "Building Target Node (VFam Child)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "target-node")
+    
+    # Wipe any stale debug APK before build
+    Remove-Item -Path (Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk") -Force -ErrorAction SilentlyContinue
+
     .\gradlew.bat assembleDebug
+    if ($LASTEXITCODE -ne 0) {
+        throw "Target Node build failed with exit code $LASTEXITCODE"
+    }
     
     $targetApkPath = Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk"
     if (Test-Path $targetApkPath) {
@@ -51,12 +58,14 @@ if ($Target -eq "target" -or $Target -eq "all") {
 if ($Target -eq "admin" -or $Target -eq "all") {
     Write-Host "Building Admin Node (VFam Admin)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "admin-node")
-    try {
-        flutter build apk --release
-    } catch {
-        Write-Host "Flutter CLI direct build warning, falling back to Android Gradle assembleRelease..." -ForegroundColor DarkYellow
-        Set-Location (Join-Path $repoRoot "admin-node\android")
-        .\gradlew.bat assembleRelease
+    
+    # Wipe any stale release APK before build
+    Remove-Item -Path (Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-release.apk") -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $repoRoot "admin-node\build\app\outputs\apk\release\app-release.apk") -Force -ErrorAction SilentlyContinue
+
+    flutter build apk --release
+    if ($LASTEXITCODE -ne 0) {
+        throw "flutter build apk --release failed with exit code $LASTEXITCODE"
     }
     
     $adminApkPath = Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-release.apk"
