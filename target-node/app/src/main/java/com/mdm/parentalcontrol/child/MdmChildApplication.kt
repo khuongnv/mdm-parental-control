@@ -10,5 +10,7 @@ class MdmChildApplication : Application() {
         super.onCreate()
         // Kích hoạt lịch tự động reset hạn mức cục bộ lúc 00:00:00
         MidnightResetReceiver.scheduleNextMidnightAlarm(this)
+        // Khởi tạo Notification Channel cho thông báo hệ thống từ Ba Mẹ
+        com.mdm.parentalcontrol.child.service.ChildNotificationHelper.createChannels(this)
     }
 }

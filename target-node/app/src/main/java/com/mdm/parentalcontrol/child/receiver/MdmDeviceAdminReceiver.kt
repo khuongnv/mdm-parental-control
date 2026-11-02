@@ -51,6 +51,16 @@ class MdmDeviceAdminReceiver : DeviceAdminReceiver() {
             // 6. Disable Debugging / ADB to prevent tampering
             dpm.addUserRestriction(admin, UserManager.DISALLOW_DEBUGGING_FEATURES)
 
+            // 7. Tu dong cap quyen POST_NOTIFICATIONS (Android 13+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                dpm.setPermissionGrantState(
+                    admin,
+                    context.packageName,
+                    android.Manifest.permission.POST_NOTIFICATIONS,
+                    DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                )
+            }
+
             Log.i(TAG, "Successfully enforced enterprise anti-tampering restrictions.")
         } catch (e: Exception) {
             Log.e(TAG, "Error applying anti-tampering policies", e)

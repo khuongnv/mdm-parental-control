@@ -6,6 +6,7 @@ import 'services/mdm_supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/activity_history_service.dart';
 import 'services/github_release_updater.dart';
+import 'services/system_notification_service.dart';
 import 'widgets/apple_notification.dart';
 import 'widgets/qr_pairing_sheet.dart';
 import 'utils/system_font_manager.dart';
@@ -17,6 +18,12 @@ void main() async {
   await SystemFontManager.init();
   // Nạp cấu hình theme (Hệ thống / Sáng / Tối AMOLED)
   await themeManager.init();
+  // Khởi tạo dịch vụ thông báo trung tâm hệ thống (System Notification Center)
+  try {
+    await SystemNotificationService().initialize();
+  } catch (e) {
+    debugPrint('SystemNotification init error: $e');
+  }
   try {
     await MdmSupabaseService.initialize();
   } catch (e) {
@@ -553,21 +560,41 @@ class _DashboardTabState extends State<DashboardTab> {
     });
 
     channel.onBroadcast(event: 'PANIC_LOCKDOWN', callback: (payload) {
-      if (mounted && payload['is_locked'] != null) {
-        setState(() => isEmergencyLocked = payload['is_locked'] == true);
+      if (payload['is_locked'] != null) {
+        final isLocked = payload['is_locked'] == true;
+        if (mounted) {
+          setState(() => isEmergencyLocked = isLocked);
+        }
+        final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Máy Con';
+        SystemNotificationService().showLockdownNotification(
+          deviceName: deviceName,
+          isLocked: isLocked,
+        );
       }
     });
 
     channel.onBroadcast(event: 'TIME_REQUEST', callback: (payload) {
+      final reqMinutes = (payload['requested_minutes'] as num?)?.toInt() ?? 15;
+      final reason = payload['reason'] as String? ?? 'Con xin thêm giờ chơi';
+      final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
+      SystemNotificationService().showTimeRequestNotification(
+        deviceName: deviceName,
+        requestedMinutes: reqMinutes,
+        reason: reason,
+      );
       if (mounted) {
         _showTimeRequestDialog(payload);
       }
     });
 
     channel.onBroadcast(event: 'ACK_MESSAGE', callback: (payload) {
+      final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
+      SystemNotificationService().showAckNotification(
+        deviceName: deviceName,
+        message: 'Dạ con nghe rồi!',
+      );
       if (mounted) {
         HapticFeedback.heavyImpact();
-        final deviceName = activeDevice?['custom_name'] ?? activeDevice?['device_name'] ?? 'Bé';
         AppleNotification.show(
           context,
           title: 'Bé Đã Phản Hồi! 👍',

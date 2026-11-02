@@ -82,6 +82,15 @@
             android:name=".receiver.MidnightResetReceiver"
             android:exported="false" />
 
+        <!-- Notification Action Receiver (Quick ACK from system notification tray) -->
+        <receiver
+            android:name=".receiver.NotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.mdm.parentalcontrol.child.ACTION_ACK_MESSAGE" />
+            </intent-filter>
+        </receiver>
+
         <!-- FileProvider for APK Installation Updates -->
         <provider
             android:name="androidx.core.content.FileProvider"

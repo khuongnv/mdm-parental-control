@@ -103,6 +103,7 @@ class UsageTrackingForegroundService : LifecycleService() {
                 deviceId = deviceId,
                 onPanicLockdown = { isLocked ->
                     Log.w(TAG, "🚨 Foreground Service handling PANIC_LOCKDOWN: $isLocked")
+                    ChildNotificationHelper.showPanicLockdownNotification(this@UsageTrackingForegroundService, isLocked)
                     lifecycleScope.launch(Dispatchers.Main) {
                         Toast.makeText(
                             this@UsageTrackingForegroundService,
@@ -118,6 +119,7 @@ class UsageTrackingForegroundService : LifecycleService() {
                 },
                 onExtraTime = { minutes ->
                     Log.i(TAG, "⏳ Foreground Service handling GRANT_EXTRA_TIME: +$minutes minutes")
+                    ChildNotificationHelper.showTimeAdjustedNotification(this@UsageTrackingForegroundService, minutes, "Ba mẹ thưởng thêm")
                     lifecycleScope.launch(Dispatchers.Main) {
                         Toast.makeText(
                             this@UsageTrackingForegroundService,
@@ -134,6 +136,7 @@ class UsageTrackingForegroundService : LifecycleService() {
                 },
                 onAdjustTime = { deltaMinutes, reason ->
                     Log.i(TAG, "⚡ Foreground Service handling ADJUST_SCREEN_TIME: delta=$deltaMinutes, reason=$reason")
+                    ChildNotificationHelper.showTimeAdjustedNotification(this@UsageTrackingForegroundService, deltaMinutes, reason)
                     lifecycleScope.launch(Dispatchers.Main) {
                         val msg = if (deltaMinutes >= 0) {
                             "🎁 Ba mẹ đã thưởng thêm $deltaMinutes phút sử dụng!"
@@ -164,6 +167,7 @@ class UsageTrackingForegroundService : LifecycleService() {
                 },
                 onTimeRequestResolved = { status, grantedMinutes ->
                     Log.i(TAG, "✅ Foreground Service handling TIME_REQUEST_RESOLVED: $status (+$grantedMinutes min)")
+                    ChildNotificationHelper.showTimeRequestResolvedNotification(this@UsageTrackingForegroundService, status, grantedMinutes)
                     lifecycleScope.launch(Dispatchers.Main) {
                         if (status == "approved" && grantedMinutes > 0) {
                             Toast.makeText(this@UsageTrackingForegroundService, "🎉 Ba mẹ đã đồng ý cho con thêm $grantedMinutes phút!", Toast.LENGTH_LONG).show()
@@ -356,34 +360,18 @@ class UsageTrackingForegroundService : LifecycleService() {
     }
 
     private fun showFiveMinuteWarning(minutesLeft: Int) {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val builder = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("⚠️ Chú ý: Còn $minutesLeft phút sử dụng!")
-            .setContentText("Thiết bị sẽ tự động khóa sau $minutesLeft phút nữa. Con hãy lưu bài tập và chuẩn bị tắt máy nhé!")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(Notification.DEFAULT_ALL)
-            .setAutoCancel(true)
-        notificationManager.notify(ALERT_NOTIFICATION_ID, builder.build())
+        ChildNotificationHelper.showFiveMinuteWarning(this, minutesLeft)
     }
 
     private fun showRemoteMessageNotification(msgId: String, title: String, body: String) {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val builder = NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setDefaults(Notification.DEFAULT_ALL)
-            .setAutoCancel(true)
-        notificationManager.notify(msgId.hashCode(), builder.build())
-
-        // Tự động gửi ACK khi nhận được tin
-        val deviceId = devicePreferences.deviceId
-        if (!deviceId.isNullOrEmpty() && msgId.isNotEmpty()) {
-            supabaseClient.sendAckMessage(deviceId, msgId)
-        }
+        val deviceId = devicePreferences.deviceId ?: ""
+        ChildNotificationHelper.showRemoteMessageNotification(
+            context = this,
+            deviceId = deviceId,
+            msgId = msgId,
+            title = title,
+            body = body
+        )
     }
 
     private fun createNotificationChannel() {

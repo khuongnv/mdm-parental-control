@@ -1,5 +1,6 @@
 package com.mdm.parentalcontrol.child.ui
 
+import android.app.NotificationManager
 import android.app.admin.DevicePolicyManager
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -41,6 +42,7 @@ import com.mdm.parentalcontrol.child.data.local.DevicePreferences
 import com.mdm.parentalcontrol.child.data.local.UsageDao
 import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
+import com.mdm.parentalcontrol.child.service.ChildNotificationHelper
 import com.mdm.parentalcontrol.child.ui.components.*
 import com.mdm.parentalcontrol.child.ui.theme.*
 import com.mdm.parentalcontrol.child.updater.GitHubReleaseUpdater
@@ -189,6 +191,13 @@ class MainActivity : AppCompatActivity() {
 
         LaunchedEffect(Unit) {
             refreshAllStatus()
+            val intentMsgId = intent?.getStringExtra("SHOW_REMOTE_MESSAGE_ID")
+            if (!intentMsgId.isNullOrEmpty()) {
+                remoteMessageId = intentMsgId
+                remoteMessageTitle = intent?.getStringExtra("SHOW_REMOTE_MESSAGE_TITLE") ?: "Tin Nhắn Từ Ba Mẹ"
+                remoteMessageBody = intent?.getStringExtra("SHOW_REMOTE_MESSAGE_BODY") ?: ""
+                showRemoteMessageDialog = true
+            }
         }
 
         // Lắng nghe kết nối Supabase Realtime
@@ -200,6 +209,7 @@ class MainActivity : AppCompatActivity() {
                     onPanicLockdown = { isLocked ->
                         toastMessage = if (isLocked) "🚨 Nhận lệnh khóa khẩn cấp từ Phụ huynh!" else "✅ Nhận lệnh mở khóa từ Phụ huynh!"
                         toastSuccess = !isLocked
+                        ChildNotificationHelper.showPanicLockdownNotification(this@MainActivity, isLocked)
                         if (isLocked) {
                             val admin = ComponentName(this@MainActivity, MdmDeviceAdminReceiver::class.java)
                             if (dpm.isAdminActive(admin)) {
@@ -215,17 +225,27 @@ class MainActivity : AppCompatActivity() {
                         toastMessage = "🎁 Ba mẹ đã thưởng thêm $mins phút sử dụng!"
                         toastSuccess = true
                         refreshAllStatus()
+                        ChildNotificationHelper.showTimeAdjustedNotification(this@MainActivity, mins, "Ba mẹ thưởng thêm")
                     },
                     onAdjustTime = { delta, reason ->
                         toastMessage = if (delta >= 0) "🎁 Ba mẹ đã thưởng thêm $delta phút sử dụng!" else "⚠️ Ba mẹ đã trừ ${-delta} phút giờ chơi!"
                         toastSuccess = delta >= 0
                         refreshAllStatus()
+                        ChildNotificationHelper.showTimeAdjustedNotification(this@MainActivity, delta, reason)
                     },
                     onRemoteMessage = { msgId, title, body, _ ->
                         remoteMessageId = msgId
                         remoteMessageTitle = title
                         remoteMessageBody = body
                         showRemoteMessageDialog = true
+                        val currentDevId = (deviceId?.takeIf { it.isNotEmpty() } ?: devicePreferences.deviceId) ?: ""
+                        ChildNotificationHelper.showRemoteMessageNotification(
+                            this@MainActivity,
+                            currentDevId,
+                            msgId,
+                            title,
+                            body
+                        )
                     },
                     onTimeRequestResolved = { status, granted ->
                         if (status == "approved" && granted > 0) {
@@ -236,6 +256,7 @@ class MainActivity : AppCompatActivity() {
                             toastSuccess = false
                         }
                         refreshAllStatus()
+                        ChildNotificationHelper.showTimeRequestResolvedNotification(this@MainActivity, status, granted)
                     },
                     onDeviceUnpaired = {
                         lifecycleScope.launch(Dispatchers.Main) {
@@ -1603,9 +1624,11 @@ class MainActivity : AppCompatActivity() {
                                 if (currentId.isNotEmpty()) {
                                     supabaseClient.sendAckMessage(currentId, msgId)
                                 }
-                                        showRemoteMessageDialog = false
-                                        toastMessage = "✅ Đã phản hồi cho Ba Mẹ: Dạ con nghe rồi!"
-                                        toastSuccess = true
+                                val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                                notifManager.cancel(msgId.hashCode())
+                                showRemoteMessageDialog = false
+                                toastMessage = "✅ Đã phản hồi cho Ba Mẹ: Dạ con nghe rồi!"
+                                toastSuccess = true
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
