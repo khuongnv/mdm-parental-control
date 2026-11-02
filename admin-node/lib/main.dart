@@ -429,7 +429,7 @@ class DashboardTab extends StatefulWidget {
   State<DashboardTab> createState() => _DashboardTabState();
 }
 
-class _DashboardTabState extends State<DashboardTab> {
+class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver {
   final MdmSupabaseService _supabaseService = MdmSupabaseService();
 
   List<Map<String, dynamic>> familyDevices = [];
@@ -448,17 +448,47 @@ class _DashboardTabState extends State<DashboardTab> {
   String quotaMode = 'daily';
 
   RealtimeChannel? _deviceRealtimeChannel;
+  Timer? _syncTimer;
+  final Set<String> _notifiedAckMessageIds = {};
+  final Set<String> _notifiedTimeRequestIds = {};
+  bool _isTimeRequestDialogShowing = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadDeviceData();
+    _startPeriodicSyncTimer();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _syncTimer?.cancel();
     _deviceRealtimeChannel?.unsubscribe();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('🔄 Admin App resumed from background: syncing all pending events...');
+      final devId = activeDevice?['id'] as String?;
+      if (devId != null) {
+        _subscribeToActiveDevice(devId);
+        _syncPendingEvents(devId);
+      }
+    }
+  }
+
+  void _startPeriodicSyncTimer() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      final devId = activeDevice?['id'] as String?;
+      if (devId != null && mounted) {
+        _syncPendingEvents(devId);
+      }
+    });
   }
 
   Future<void> _loadDeviceData() async {
@@ -695,6 +725,84 @@ class _DashboardTabState extends State<DashboardTab> {
 
     channel.subscribe();
     _deviceRealtimeChannel = channel;
+    _syncPendingEvents(deviceId);
+  }
+
+  Future<void> _syncPendingEvents(String deviceId) async {
+    try {
+      // 1. Kiểm tra yêu cầu xin giờ đang pending (time_requests)
+      final pendingRequests = await MdmSupabaseService.client
+          .from('time_requests')
+          .select()
+          .eq('device_id', deviceId)
+          .eq('status', 'pending')
+          .order('created_at', ascending: false)
+          .limit(1);
+
+      if (pendingRequests.isNotEmpty) {
+        final req = Map<String, dynamic>.from(pendingRequests.first);
+        _handleTimeRequest(req);
+      }
+
+      // 2. Kiểm tra phản hồi xác nhận lời nhắc của bé (device_messages)
+      final recentAckMessages = await MdmSupabaseService.client
+          .from('device_messages')
+          .select()
+          .eq('device_id', deviceId)
+          .eq('is_acknowledged', true)
+          .order('acknowledged_at', ascending: false)
+          .limit(1);
+
+      if (recentAckMessages.isNotEmpty) {
+        final msg = Map<String, dynamic>.from(recentAckMessages.first);
+        final ackAtStr = msg['acknowledged_at'] as String?;
+        if (ackAtStr != null) {
+          final ackAt = DateTime.tryParse(ackAtStr);
+          if (ackAt != null && DateTime.now().toUtc().difference(ackAt).inMinutes < 30) {
+            _handleAckMessage(msg);
+          }
+        }
+      }
+
+      // 3. Đồng bộ Telemetry & trạng thái mới nhất từ bảng devices
+      final devData = await MdmSupabaseService.client
+          .from('devices')
+          .select('battery_level, is_charging, current_app_name, is_locked, extra_time_minutes, agent_version')
+          .eq('id', deviceId)
+          .maybeSingle();
+
+      if (devData != null && mounted) {
+        setState(() {
+          if (devData['battery_level'] != null) {
+            batteryLevel = (devData['battery_level'] as num).toInt();
+            activeDevice?['battery_level'] = batteryLevel;
+          }
+          if (devData['is_charging'] != null) {
+            isCharging = devData['is_charging'] == true;
+            activeDevice?['is_charging'] = isCharging;
+          }
+          if (devData['current_app_name'] != null) {
+            currentAppName = devData['current_app_name'] as String;
+            activeDevice?['current_app_name'] = currentAppName;
+          }
+          if (devData['agent_version'] != null) {
+            activeDevice?['agent_version'] = devData['agent_version'];
+          }
+          if (devData['is_locked'] != null) {
+            isEmergencyLocked = devData['is_locked'] == true;
+          }
+          if (devData['extra_time_minutes'] != null) {
+            extraTimeMinutes = (devData['extra_time_minutes'] as num).toInt();
+          }
+          final idx = familyDevices.indexWhere((d) => d['id'] == deviceId);
+          if (idx != -1) {
+            familyDevices[idx] = Map<String, dynamic>.from(familyDevices[idx])..addAll(devData);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error in _syncPendingEvents: $e');
+    }
   }
 
   DateTime? _lastAckNotificationTime;
@@ -705,6 +813,10 @@ class _DashboardTabState extends State<DashboardTab> {
         ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
         : rawPayload;
     final msgId = (payload['message_id'] ?? payload['id'])?.toString();
+    if (msgId != null && msgId.isNotEmpty) {
+      if (_notifiedAckMessageIds.contains(msgId)) return;
+      _notifiedAckMessageIds.add(msgId);
+    }
     final now = DateTime.now();
     if (_lastAckMessageId == msgId && _lastAckNotificationTime != null &&
         now.difference(_lastAckNotificationTime!).inSeconds < 3) {
@@ -741,6 +853,11 @@ class _DashboardTabState extends State<DashboardTab> {
     final payload = (rawPayload['payload'] is Map)
         ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
         : rawPayload;
+    final reqId = (payload['id'] ?? payload['request_id'])?.toString();
+    if (reqId != null && reqId.isNotEmpty) {
+      if (_notifiedTimeRequestIds.contains(reqId)) return;
+      _notifiedTimeRequestIds.add(reqId);
+    }
     final now = DateTime.now();
     if (_lastTimeRequestNotificationTime != null &&
         now.difference(_lastTimeRequestNotificationTime!).inSeconds < 3) {
@@ -1515,6 +1632,8 @@ class _DashboardTabState extends State<DashboardTab> {
 
   /// Nhận và xử lý yêu cầu xin thêm giờ của bé (P2-CHILD-02)
   void _showTimeRequestDialog(Map<String, dynamic> rawPayload) {
+    if (_isTimeRequestDialogShowing) return;
+    _isTimeRequestDialogShowing = true;
     HapticFeedback.heavyImpact();
     final payload = (rawPayload['payload'] is Map)
         ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
@@ -1627,7 +1746,9 @@ class _DashboardTabState extends State<DashboardTab> {
           ),
         ],
       ),
-    );
+    ).then((_) {
+      _isTimeRequestDialogShowing = false;
+    });
   }
 
   @override

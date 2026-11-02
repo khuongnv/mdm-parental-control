@@ -102,6 +102,16 @@ class UsageTrackingForegroundService : LifecycleService() {
         checkAndReportTelemetry(force = true)
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildSilentNotification())
+        ensureSupabaseConnection()
+        startAdaptivePolling()
+        startTelemetryReportingLoop()
+        checkAndReportTelemetry(force = true)
+        return START_STICKY
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(screenReceiver)
@@ -382,17 +392,51 @@ class UsageTrackingForegroundService : LifecycleService() {
         }
     }
 
+    private var lastNotifiedMessageId: String? = null
+    private var isEmergencyLocked: Boolean = false
+
     private fun startTelemetryReportingLoop() {
         telemetryJob?.cancel()
         telemetryJob = lifecycleScope.launch(Dispatchers.IO) {
             while (isActive) {
                 try {
                     checkAndReportTelemetry()
+                    checkPendingUnreadMessages()
+                    checkRemotePolicyChanges()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error in telemetry reporting loop: ${e.message}")
+                    Log.w(TAG, "Error in background reporting loop: ${e.message}")
                 }
-                val interval = if (isScreenOn) 30000L else 60000L
+                val interval = if (isScreenOn) 25000L else 50000L
                 delay(interval)
+            }
+        }
+    }
+
+    private fun checkPendingUnreadMessages() {
+        val deviceId = devicePreferences.deviceId ?: return
+        supabaseClient.fetchLatestUnreadMessage(deviceId) { msg ->
+            if (msg != null && msg.id != lastNotifiedMessageId && msg.id.isNotEmpty()) {
+                lastNotifiedMessageId = msg.id
+                Log.i(TAG, "📬 Found unread message via background polling: ${msg.title} - ${msg.body}")
+                showRemoteMessageNotification(msg.id, msg.title, msg.body)
+            }
+        }
+    }
+
+    private fun checkRemotePolicyChanges() {
+        val deviceId = devicePreferences.deviceId ?: return
+        supabaseClient.fetchDeviceStatus(deviceId) { status ->
+            if (status != null) {
+                if (status.isLocked != isEmergencyLocked) {
+                    isEmergencyLocked = status.isLocked
+                    Log.w(TAG, "🚨 Lock status changed remotely in DB to isLocked=${status.isLocked}")
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+                        usageDao.savePolicy(currentPolicy.copy(isEmergencyLockdown = status.isLocked))
+                        enforceLockdown(status.isLocked)
+                    }
+                    ChildNotificationHelper.showPanicLockdownNotification(this@UsageTrackingForegroundService, status.isLocked)
+                }
             }
         }
     }

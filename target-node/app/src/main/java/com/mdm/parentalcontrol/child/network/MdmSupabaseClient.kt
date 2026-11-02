@@ -395,6 +395,18 @@ class MdmSupabaseClient @Inject constructor() {
                                     put("table", "pairing_sessions")
                                     put("filter", "device_id=eq.$deviceId")
                                 })
+                                put(JSONObject().apply {
+                                    put("event", "INSERT")
+                                    put("schema", "public")
+                                    put("table", "device_messages")
+                                    put("filter", "device_id=eq.$deviceId")
+                                })
+                                put(JSONObject().apply {
+                                    put("event", "UPDATE")
+                                    put("schema", "public")
+                                    put("table", "time_requests")
+                                    put("filter", "device_id=eq.$deviceId")
+                                })
                             }
                             put("postgres_changes", pgChanges)
                         })
@@ -418,7 +430,7 @@ class MdmSupabaseClient @Inject constructor() {
                     if (event == "broadcast") {
                         val payload = msg.optJSONObject("payload")
                         val innerEvent = payload?.optString("event")
-                        val innerPayload = payload?.optJSONObject("payload")
+                        val innerPayload = payload?.optJSONObject("payload") ?: payload
 
                         when (innerEvent) {
                             "PANIC_LOCKDOWN" -> {
@@ -472,7 +484,24 @@ class MdmSupabaseClient @Inject constructor() {
                         val record = data?.optJSONObject("record")
                         val table = data?.optString("table")
                         if (record != null) {
-                            if (table == "pairing_sessions") {
+                            if (table == "device_messages") {
+                                val isAck = record.optBoolean("is_acknowledged", false)
+                                if (!isAck) {
+                                    val msgId = record.optString("id", "")
+                                    val title = record.optString("title", "🔔 Nhắc nhở từ Ba Mẹ")
+                                    val body = record.optString("body", "")
+                                    val template = record.optString("template_key", "custom")
+                                    Log.i(TAG, "💬 Supabase Postgres Changes: device_messages INSERT: $title - $body")
+                                    callbackList.forEach { it.onRemoteMessage?.invoke(msgId, title, body, template) }
+                                }
+                            } else if (table == "time_requests") {
+                                val status = record.optString("status", "")
+                                val grantedMinutes = record.optInt("granted_minutes", 0)
+                                if (status == "approved" || status == "rejected") {
+                                    Log.i(TAG, "✅ Supabase Postgres Changes: time_requests UPDATE: $status (+$grantedMinutes min)")
+                                    callbackList.forEach { it.onTimeRequestResolved?.invoke(status, grantedMinutes) }
+                                }
+                            } else if (table == "pairing_sessions") {
                                 val isClaimed = record.optBoolean("is_claimed", false)
                                 if (isClaimed) {
                                     Log.i(TAG, "✨ Supabase Postgres Changes: pairing_sessions is_claimed=true")
@@ -686,6 +715,100 @@ class MdmSupabaseClient @Inject constructor() {
         webSocket?.close(1000, "Normal closure")
         webSocket = null
         isConnected = false
+    }
+
+    data class UnreadMessage(
+        val id: String,
+        val title: String,
+        val body: String,
+        val templateKey: String?,
+        val createdAt: String
+    )
+
+    fun fetchLatestUnreadMessage(deviceId: String, onResult: (UnreadMessage?) -> Unit) {
+        val url = "$supabaseUrl/rest/v1/device_messages?device_id=eq.$deviceId&is_acknowledged=eq.false&order=created_at.desc&limit=1"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .get()
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onResult(null)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use { res ->
+                    if (res.isSuccessful) {
+                        val bodyStr = res.body?.string()
+                        if (!bodyStr.isNullOrEmpty()) {
+                            try {
+                                val array = JSONArray(bodyStr)
+                                if (array.length() > 0) {
+                                    val item = array.getJSONObject(0)
+                                    val msg = UnreadMessage(
+                                        id = item.optString("id", ""),
+                                        title = item.optString("title", "🔔 Nhắc nhở từ Ba Mẹ"),
+                                        body = item.optString("body", ""),
+                                        templateKey = item.optString("template_key", "custom"),
+                                        createdAt = item.optString("created_at", "")
+                                    )
+                                    onResult(msg)
+                                    return
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    onResult(null)
+                }
+            }
+        })
+    }
+
+    data class DeviceRemoteStatus(
+        val isLocked: Boolean,
+        val extraMinutes: Int
+    )
+
+    fun fetchDeviceStatus(deviceId: String, onResult: (DeviceRemoteStatus?) -> Unit) {
+        val url = "$supabaseUrl/rest/v1/devices?id=eq.$deviceId&select=is_locked,extra_time_minutes"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .get()
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onResult(null)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use { res ->
+                    if (res.isSuccessful) {
+                        val bodyStr = res.body?.string()
+                        if (!bodyStr.isNullOrEmpty()) {
+                            try {
+                                val array = JSONArray(bodyStr)
+                                if (array.length() > 0) {
+                                    val item = array.getJSONObject(0)
+                                    val status = DeviceRemoteStatus(
+                                        isLocked = item.optBoolean("is_locked", false),
+                                        extraMinutes = item.optInt("extra_time_minutes", 0)
+                                    )
+                                    onResult(status)
+                                    return
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    onResult(null)
+                }
+            }
+        })
     }
 
     companion object {

@@ -68,7 +68,7 @@ if ($Target -eq "admin" -or $Target -eq "all") {
     $adminPubspecPath = Join-Path $repoRoot "admin-node\pubspec.yaml"
     if (Test-Path $adminPubspecPath) {
         $pubContent = Get-Content -Path $adminPubspecPath -Raw
-        $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+10"
+        $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+11"
         Set-Content -Path $adminPubspecPath -Value $pubContent -NoNewline
     }
 
