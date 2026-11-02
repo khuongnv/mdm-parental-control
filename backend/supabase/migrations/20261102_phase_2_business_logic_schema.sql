@@ -24,8 +24,8 @@ ALTER TABLE public.policies
 CREATE TABLE IF NOT EXISTS public.family_invites (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     family_id UUID NOT NULL REFERENCES public.families(id) ON DELETE CASCADE,
-    invite_code VARCHAR(8) NOT NULL UNIQUE,
-    created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    invite_code VARCHAR(20) NOT NULL UNIQUE,
+    created_by UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     role TEXT NOT NULL DEFAULT 'parent' CHECK (role IN ('parent', 'viewer')),
     expires_at TIMESTAMPTZ NOT NULL,
     is_used BOOLEAN NOT NULL DEFAULT false,
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS public.device_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id UUID NOT NULL REFERENCES public.devices(id) ON DELETE CASCADE,
     family_id UUID NOT NULL REFERENCES public.families(id) ON DELETE CASCADE,
-    sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    sender_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     template_key TEXT,
     message_text TEXT NOT NULL,
     is_acknowledged BOOLEAN NOT NULL DEFAULT false,
@@ -74,7 +74,9 @@ ALTER TABLE public.device_messages ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Members can view invites of their family" ON public.family_invites;
 CREATE POLICY "Members can view invites of their family" ON public.family_invites
-    FOR SELECT USING (public.is_member_of_family(family_id));
+    FOR SELECT USING (public.is_member_of_family(family_id) OR EXISTS (
+        SELECT 1 FROM public.families WHERE id = family_id AND created_by = auth.uid()
+    ));
 
 DROP POLICY IF EXISTS "Allow authenticated to query active invite by code" ON public.family_invites;
 CREATE POLICY "Allow authenticated to query active invite by code" ON public.family_invites
@@ -82,7 +84,9 @@ CREATE POLICY "Allow authenticated to query active invite by code" ON public.fam
 
 DROP POLICY IF EXISTS "Parents can view and resolve time requests" ON public.time_requests;
 CREATE POLICY "Parents can view and resolve time requests" ON public.time_requests
-    FOR ALL USING (public.is_member_of_family(family_id));
+    FOR ALL USING (public.is_member_of_family(family_id) OR EXISTS (
+        SELECT 1 FROM public.families WHERE id = family_id AND created_by = auth.uid()
+    ));
 
 DROP POLICY IF EXISTS "Target agent can insert time requests" ON public.time_requests;
 CREATE POLICY "Target agent can insert time requests" ON public.time_requests
@@ -90,11 +94,17 @@ CREATE POLICY "Target agent can insert time requests" ON public.time_requests
 
 DROP POLICY IF EXISTS "Parents can view and send device messages" ON public.device_messages;
 CREATE POLICY "Parents can view and send device messages" ON public.device_messages
-    FOR ALL USING (public.is_member_of_family(family_id));
+    FOR ALL USING (public.is_member_of_family(family_id) OR EXISTS (
+        SELECT 1 FROM public.families WHERE id = family_id AND created_by = auth.uid()
+    ));
 
 DROP POLICY IF EXISTS "Target agent can acknowledge device messages" ON public.device_messages;
 CREATE POLICY "Target agent can acknowledge device messages" ON public.device_messages
     FOR UPDATE USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Target agent can insert acknowledged device messages" ON public.device_messages;
+CREATE POLICY "Target agent can insert acknowledged device messages" ON public.device_messages
+    FOR INSERT WITH CHECK (true);
 
 -- 4. STORED PROCEDURES (RPC)
 
@@ -105,17 +115,21 @@ CREATE OR REPLACE FUNCTION public.create_family_invite(
 )
 RETURNS JSONB AS $$
 DECLARE
-    v_code VARCHAR(8);
+    v_code VARCHAR(20);
     v_invite_id UUID;
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM public.family_members
         WHERE family_id = p_family_id AND user_id = auth.uid()
+    ) AND NOT EXISTS (
+        SELECT 1 FROM public.families
+        WHERE id = p_family_id AND created_by = auth.uid()
     ) THEN
         RAISE EXCEPTION 'Không có quyền tạo lời mời cho gia đình này';
     END IF;
 
-    v_code := 'FAM-' || upper(substring(replace(encode(gen_random_bytes(4), 'base64'), '/', 'X') from 1 for 4));
+    -- Sinh mã 6 ký tự chuẩn FAM-XXXX
+    v_code := 'FAM-' || upper(substring(md5(random()::text || clock_timestamp()::text) from 1 for 4));
 
     INSERT INTO public.family_invites (family_id, invite_code, created_by, role, expires_at)
     VALUES (p_family_id, v_code, auth.uid(), p_role, now() + INTERVAL '24 hours')
@@ -131,7 +145,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- 4.2. Nhập mã mời để tham gia gia đình
 CREATE OR REPLACE FUNCTION public.join_family_by_code(
-    p_invite_code VARCHAR(8)
+    p_invite_code TEXT
 )
 RETURNS JSONB AS $$
 DECLARE
@@ -171,7 +185,9 @@ DECLARE
     v_family_id UUID;
 BEGIN
     SELECT family_id INTO v_family_id FROM public.devices WHERE id = p_device_id;
-    IF v_family_id IS NULL OR NOT public.is_member_of_family(v_family_id) THEN
+    IF v_family_id IS NULL OR NOT (public.is_member_of_family(v_family_id) OR EXISTS (
+        SELECT 1 FROM public.families WHERE id = v_family_id AND created_by = auth.uid()
+    )) THEN
         RAISE EXCEPTION 'Không có quyền thao tác trên thiết bị này';
     END IF;
 
@@ -227,7 +243,9 @@ BEGIN
         RAISE EXCEPTION 'Yêu cầu không tồn tại';
     END IF;
 
-    IF NOT public.is_member_of_family(v_req.family_id) THEN
+    IF NOT (public.is_member_of_family(v_req.family_id) OR EXISTS (
+        SELECT 1 FROM public.families WHERE id = v_req.family_id AND created_by = auth.uid()
+    )) THEN
         RAISE EXCEPTION 'Không có quyền duyệt yêu cầu của gia đình này';
     END IF;
 
@@ -249,3 +267,37 @@ BEGIN
     RETURN jsonb_build_object('success', true, 'status', p_status, 'granted_minutes', p_granted_minutes);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 5. GRANTS & PERMISSIONS
+GRANT ALL ON public.family_invites TO authenticated, service_role, anon;
+GRANT ALL ON public.time_requests TO authenticated, service_role, anon;
+GRANT ALL ON public.device_messages TO authenticated, service_role, anon;
+
+GRANT EXECUTE ON FUNCTION public.create_family_invite TO authenticated, service_role, anon;
+GRANT EXECUTE ON FUNCTION public.join_family_by_code TO authenticated, service_role, anon;
+GRANT EXECUTE ON FUNCTION public.revoke_device_management TO authenticated, service_role, anon;
+GRANT EXECUTE ON FUNCTION public.create_time_request TO authenticated, service_role, anon;
+GRANT EXECUTE ON FUNCTION public.resolve_time_request TO authenticated, service_role, anon;
+
+-- 6. REALTIME PUBLICATION
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND tablename = 'time_requests'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.time_requests;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND tablename = 'device_messages'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.device_messages;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND tablename = 'family_invites'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.family_invites;
+    END IF;
+END $$;
