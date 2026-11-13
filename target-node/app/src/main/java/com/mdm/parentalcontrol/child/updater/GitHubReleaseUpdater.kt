@@ -67,7 +67,7 @@ class GitHubReleaseUpdater @Inject constructor(
         repoName: String = "mdm-parental-control",
         currentVersion: String = BuildConfig.VERSION_NAME
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
-        val apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases/latest"
+        val apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=15"
         var conn: HttpURLConnection? = null
         try {
             val url = URL(apiUrl)
@@ -80,38 +80,51 @@ class GitHubReleaseUpdater @Inject constructor(
 
             if (conn.responseCode == 200) {
                 val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(responseText)
-                val tagName = json.getString("tag_name")
-                val body = json.optString("body", "")
+                val releases = org.json.JSONArray(responseText)
 
-                val assets = json.getJSONArray("assets")
-                var downloadUrl: String? = null
+                for (rIndex in 0 until releases.length()) {
+                    val json = releases.getJSONObject(rIndex)
+                    val tagName = json.getString("tag_name")
+                    
+                    // Lọc chỉ nhận release dành riêng cho child
+                    val isChildRelease = tagName.startsWith("child-android-v") || 
+                                         tagName.startsWith("child-v") || 
+                                         tagName.startsWith("target-v") ||
+                                         (tagName.startsWith("v") && !tagName.contains("admin"))
+                    if (!isChildRelease) continue
 
-                // 1. Ưu tiên tìm tệp apk dành riêng cho child
-                for (i in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(i)
-                    val name = asset.getString("name").lowercase()
-                    if (name.contains("child") || name.contains("target")) {
-                        downloadUrl = asset.getString("browser_download_url")
-                        break
-                    }
-                }
+                    val body = json.optString("body", "")
+                    val assets = json.getJSONArray("assets")
+                    var downloadUrl: String? = null
 
-                // 2. Fallback nếu không thấy tag child riêng nhưng là file apk đơn lẻ
-                if (downloadUrl == null) {
+                    // 1. Ưu tiên tìm tệp apk dành riêng cho child
                     for (i in 0 until assets.length()) {
                         val asset = assets.getJSONObject(i)
                         val name = asset.getString("name").lowercase()
-                        if (name.endsWith(".apk") && !name.contains("admin")) {
+                        if (name.contains("child") || name.contains("target")) {
                             downloadUrl = asset.getString("browser_download_url")
                             break
                         }
                     }
-                }
 
-                if (downloadUrl != null) {
-                    val isNewer = isNewerVersion(currentVersion, tagName)
-                    return@withContext ReleaseInfo(tagName, downloadUrl, body, isNewer)
+                    // 2. Fallback nếu không thấy tag child riêng nhưng là file apk đơn lẻ
+                    if (downloadUrl == null) {
+                        for (i in 0 until assets.length()) {
+                            val asset = assets.getJSONObject(i)
+                            val name = asset.getString("name").lowercase()
+                            if (name.endsWith(".apk") && !name.contains("admin")) {
+                                downloadUrl = asset.getString("browser_download_url")
+                                break
+                            }
+                        }
+                    }
+
+                    if (downloadUrl != null) {
+                        val isNewer = isNewerVersion(currentVersion, tagName)
+                        if (isNewer) {
+                            return@withContext ReleaseInfo(tagName, downloadUrl, body, true)
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
