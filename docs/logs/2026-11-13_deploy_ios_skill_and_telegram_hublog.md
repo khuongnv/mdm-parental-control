@@ -74,4 +74,12 @@
 ## 5. Kết Luận & Hướng Dẫn Tiếp Theo (Conclusion & Next Steps)
 - Kỹ năng deploy iOS cho `admin-node` đã sẵn sàng thực thi tự động bất cứ lúc nào qua lệnh:
   `powershell -File .agents/skills/deploy-app/scripts/deploy.ps1 -Target admin -Platform ios -Version <X.Y.Z>`
+- **Chi tiết bản phát hành iOS Enterprise v1.4.0 đã hoàn tất**:
+  - **Git Tag**: `admin-ios-v1.4.0`
+  - **GitHub Release**: [https://github.com/khuongnv/mdm-parental-control/releases/tag/admin-ios-v1.4.0](https://github.com/khuongnv/mdm-parental-control/releases/tag/admin-ios-v1.4.0)
+  - **Tệp cài đặt (.ipa)**: `vfam-admin-ios-1.4.0.ipa` (9.1 MB, 9,527,850 bytes)
+  - **Mã băm SHA256**: `5C80B5C4F8CAA801EB5090A6D2698127BC627824038166290F0914191965DF31`
+  - **Link cài đặt trực tiếp iPhone/iPad (Apple OTA)**:
+    `itms-services://?action=download-manifest&url=https://github.com/khuongnv/mdm-parental-control/releases/download/admin-ios-v1.4.0/manifest.plist`
+  - **Giám sát Telegram**: Đã gửi thành công 6 bước thông báo trực tiếp vào kênh **HUB-LOG** qua bot **HniBOT** (ID tin nhắn kết thúc: `2224`).
 
