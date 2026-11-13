@@ -3332,6 +3332,11 @@ class _SettingsTabState extends State<SettingsTab> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () async {
+                    if (release.isIosOta) {
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      await _updater.executeUpdate(release);
+                      return;
+                    }
                     setDialogState(() => downloadProgress = 0.0);
                     try {
                       final apkFile = await _updater.downloadApk(

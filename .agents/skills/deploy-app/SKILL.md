@@ -1,86 +1,121 @@
 ---
 name: deploy-app
-description: "Quy trình và kịch bản tự động hóa build, gắn git tag và phát hành (deploy/release) phiên bản cập nhật độc lập cho từng ứng dụng di động (target-node hoặc admin-node) lên GitHub Releases."
+description: "Quy trình và kịch bản tự động hóa build, ký số Enterprise, gắn git tag và phát hành (deploy/release) các ứng dụng di động (Child DO Android, Parent Admin Android & iOS Enterprise) lên GitHub Releases kèm giám sát Telegram HUB-LOG / HniBOT."
+user-invocable: true
 ---
 
-# 🚀 Kỹ Năng: Deploy & Cập Nhật Phiên Bản Từng Ứng Dụng (Deploy-App Skill)
+# 🚀 Kỹ Năng: Deploy Đa Nền Tảng (Android & iOS Enterprise) & Giám Sát Telegram
 
-Kỹ năng này hướng dẫn và cung cấp công cụ tự động để **Swarm Agent** và lập trình viên phát hành phiên bản mới độc lập cho:
-1. `target-node`: Ứng dụng con nắm quyền **Android Device Owner (DO)**. Tải về và tự động cài đặt ngầm (Silent Install) qua GitHub Release.
-2. `admin-node`: Ứng dụng di động **Parent Admin (Flutter)**. Thông báo cho phụ huynh khi có phiên bản mới trên GitHub Release.
+Kỹ năng này hướng dẫn và cung cấp công cụ tự động hóa toàn diện 100% để **Swarm Agent** và kỹ sư phát hành phiên bản mới độc lập cho các ứng dụng trong hệ thống MDM Parental Control:
+1. `target-node`: Ứng dụng máy con nắm quyền **Android Device Owner (DO)**. Tự động tải về và nâng cấp ngầm (**Silent Install**) qua GitHub Releases.
+2. `admin-node` (Android): Ứng dụng di động **Parent Admin (Flutter Android APK)**. Thông báo trong app và tải APK cài đè.
+3. `admin-node` (iOS): Ứng dụng di động **Parent Admin (Flutter iOS Enterprise IPA)**. Tự động build từ xa qua Mac M1 Pro (`100.111.29.5`), ký chứng chỉ In-House Enterprise VNPT, xuất file `.ipa` + Apple OTA Manifest (`manifest.plist`), cài đặt trực tiếp qua giao thức `itms-services://`.
+4. **Giám sát thời gian thực qua Telegram**: Tự động thông báo từng bước thực hiện và tổng kết kết quả lên kênh **HUB-LOG** qua bot **HniBOT**.
 
 ---
 
-## 🛠️ 1. Cấu Trúc Lệnh Triển Khai (`deploy.ps1`)
+## 🏷️ 1. Quy Chuẩn Phân Biệt Ứng Dụng Trên GitHub Releases
 
-Kịch bản được cung cấp sẵn tại `.agents/skills/deploy-app/scripts/deploy.ps1`:
+Để các client mobile tự động nhận diện và cập nhật đúng phiên bản mà không bị xung đột giữa Android vs iOS, giữa Admin vs Child:
 
+| Ứng dụng | Nền tảng | Git Tag Định Danh | Tệp Đính Kèm (Release Assets) | Cơ Chế Nâng Cấp Client |
+| :--- | :--- | :--- | :--- | :--- |
+| **Child Agent** (`target-node`) | Android | `child-android-vX.Y.Z` | `vfam-child-android-X.Y.Z.apk` | DO Silent Install qua `PackageInstaller` |
+| **Parent Admin** (`admin-node`) | Android | `admin-android-vX.Y.Z` | `vfam-admin-android-X.Y.Z.apk` | In-App Intent mở trình cài đặt APK |
+| **Parent Admin** (`admin-node`) | iOS | `admin-ios-vX.Y.Z` | `vfam-admin-ios-X.Y.Z.ipa`<br>`manifest.plist` | Apple OTA: `itms-services://?action=download-manifest&url=...` |
+
+> [!IMPORTANT]
+> - Client Android (`GitHubReleaseUpdater.kt` & `github_release_updater.dart`) và Client iOS tự động lọc theo tiền tố `child-android-v`, `admin-android-v`, hoặc `admin-ios-v` từ danh sách releases của GitHub API, loại bỏ triệt để rủi ro nhận nhầm bản build của nền tảng khác.
+
+---
+
+## 📲 2. Kiến Trúc Build & Ký Số iOS Enterprise Từ Xa (Remote Mac M1 Pro)
+
+Đối với `admin-node` iOS:
+- **Máy Build**: Mac M1 Pro (`100.111.29.5`, SSH port 22, user `khuongnv`, pass `1230`).
+- **Chứng chỉ Enterprise**: `VNPT_Enterprise_iOS Distribution_18082029.p12` (Team ID: `JPMH34L85K`).
+- **Provisioning Profile**: `docs/dev/Prov_HNI_comdhtthniquanlytaptrung.mobileprovision` (UUID: `f5a84849-5dda-4021-adcb-877132002773`, Name: `Prov_HNI_com.dhtthni.quanlytaptrung`).
+- **Bundle ID**: `com.dhtthni.quanlytaptrung` (đã khai báo đồng bộ trong `docs/dev/GoogleService-Info.plist` và `Runner.xcodeproj`).
+- **Quy tắc ký số**: Manual Signing trong `Release.xcconfig` và `ExportOptions-enterprise.plist`, đồng thời khóa toàn bộ Pods với `CODE_SIGNING_ALLOWED = "NO"`.
+
+---
+
+## 🛰️ 3. Kênh Giám Sát Telegram Telemetry (HUB-LOG & HniBOT)
+
+- **Bot**: `HniBOT` (`8005142785:AAHSrJ2Yp4l0Gj6Yk7iu8hwSwThZIiVKrCU`)
+- **Kênh tiếp nhận**: `HUB-LOG` (`-1003609918702`)
+- **Các mốc thông báo tự động**:
+  - `Bước 1`: Khởi động phát hành (Tên app, Nền tảng, Phiên bản, Git Tag)
+  - `Bước 2`: Kiểm tra Keychain & Nạp Chứng chỉ Enterprise / Profile trên Mac M1 Pro
+  - `Bước 3`: Đồng bộ Source Code & Cài đặt Pods (`flutter pub get`, `pod install`)
+  - `Bước 4`: Biên dịch Release IPA (`xcodebuild archive` & `xcodebuild -exportArchive`)
+  - `Bước 5`: Đóng gói Apple OTA Manifest (`manifest.plist`) & Đẩy lên GitHub Releases
+  - `Bước 6`: **TỔNG KẾT PHÁT HÀNH THÀNH CÔNG** (Link OTA trực tiếp cho iPhone, Link GitHub Release, mã băm SHA256)
+
+---
+
+## 🛠️ 4. Hướng Dẫn Sử Dụng Lệnh Triển Khai (`deploy.ps1`)
+
+Kịch bản điều phối trung tâm: `.agents/skills/deploy-app/scripts/deploy.ps1`
+
+### Cú pháp cơ bản:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deploy.ps1 `
-  -Target <target|admin|all> `
+  -Target <child|admin|all> `
+  -Platform <android|ios|all> `
   -Version <X.Y.Z> `
-  -Notes "<Nội dung mô tả bản cập nhật>"
+  -Notes "<Nội dung ghi chú cập nhật>"
 ```
 
-### Các Tham Số (Parameters):
-- `-Target`:
-  - `target`: Chỉ build và phát hành `target-node` (Child DO Agent) với tag `target-vX.Y.Z`.
-  - `admin`: Chỉ build và phát hành `admin-node` (Parent App) với tag `admin-vX.Y.Z`.
-  - `all`: Build và phát hành cả 2 ứng dụng với tag chung `vX.Y.Z`.
-- `-Version`: Định dạng Semantic Versioning, ví dụ: `1.0.1`, `1.1.0`.
-- `-Notes`: Ghi chú phát hành hiển thị trên GitHub Release (Release Notes).
+### Các ví dụ cụ thể:
 
----
-
-## 🔄 2. Quy Trình Vận Hành Của Swarm Agent Khi Nhận Yêu Cầu Deploy
-
-Khi người dùng yêu cầu: *"Deploy phiên bản mới cho target-node v1.0.2"* hoặc *"Phát hành app phụ huynh v1.0.1"*:
-
-```mermaid
-flowchart TD
-    User([Người dùng yêu cầu Deploy]) --> Lead[lead-architect]
-    Lead --> Log[docs/logs/YYYY-MM-DD_deploy_<target>_vX.md]
-    Lead --> QA[qa-security-perf-specialist: Rà soát build & test]
-    QA --> Script[Chạy script deploy.ps1]
-    
-    subgraph Deploy Execution
-        Script --> Compile[Build APK cục bộ / CI]
-        Compile --> GitTag[Tạo Git Tag độc lập target-vX hoặc admin-vX]
-        GitTag --> Push[Đẩy Tag lên Remote GitHub]
-        Push --> GHRelease[gh release create đính kèm APK]
-    end
-    
-    GHRelease --> ClientAutoUpdate[Ứng dụng Mobile tự bắt link APK mới nhất]
-    ClientAutoUpdate --> Result([Báo cáo hoàn thành])
-```
-
----
-
-## 📦 3. Các Ví Dụ Thao Tác Điển Hình
-
-### Ví dụ 1: Phát hành bản cập nhật cho máy con (`target-node`)
-```powershell
-powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deploy.ps1 `
-  -Target target `
-  -Version "1.0.1" `
-  -Notes "Nâng cấp bảo mật Anti-Tampering, bổ sung tự động cấp quyền ngầm và sửa lỗi Room DB."
-```
-> **Cơ chế tại máy con**: Service `GitHubReleaseUpdater.kt` định kỳ gọi GitHub API, nhận thấy tag `target-v1.0.1` mới hơn phiên bản hiện tại, tự động tải APK `mdm-child-agent-1.0.1.apk` và thực thi **Silent Install** ngầm mà không làm phiền trẻ.
-
-### Ví dụ 2: Phát hành bản cập nhật cho ứng dụng phụ huynh (`admin-node`)
+#### 1. Phát hành riêng iOS cho Parent Admin (`admin-node`):
 ```powershell
 powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deploy.ps1 `
   -Target admin `
-  -Version "1.0.1" `
-  -Notes "Bổ sung biểu đồ PieChart phân loại ứng dụng, hỗ trợ SignalR WebSocket thời gian thực."
+  -Platform ios `
+  -Version "1.0.0" `
+  -Notes "Phát hành phiên bản iOS Enterprise đầu tiên cho ứng dụng phụ huynh VFam Parent."
 ```
-> **Cơ chế tại máy phụ huynh**: `github_release_updater.dart` phát hiện tag `admin-v1.0.1`, hiển thị banner cập nhật và liên kết tải bản cài đặt mới.
+> Tự động SSH sang Mac M1 Pro, build IPA, ký chữ ký số VNPT Enterprise, xuất OTA Manifest, đẩy lên GitHub Release `admin-ios-v1.0.0` và bắn thông báo real-time lên Telegram HUB-LOG.
+
+#### 2. Phát hành riêng Android cho Parent Admin (`admin-node`):
+```powershell
+powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deploy.ps1 `
+  -Target admin `
+  -Platform android `
+  -Version "1.0.1" `
+  -Notes "Nâng cấp giao diện biểu đồ Screen Time và tích hợp Supabase Realtime."
+```
+> Build APK cục bộ, tạo tag `admin-android-v1.0.1`, phát hành GitHub Release và gửi thông báo Telegram.
+
+#### 3. Phát hành bản cập nhật cho máy con (`target-node` - Child DO Agent):
+```powershell
+powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deploy.ps1 `
+  -Target child `
+  -Platform android `
+  -Version "1.0.2" `
+  -Notes "Cải tiến Anti-Tampering, tối ưu Room DB và silent update qua Device Owner."
+```
+> Tạo tag `child-android-v1.0.2`, phát hành APK `vfam-child-android-1.0.2.apk`.
+
+#### 4. Phát hành trọn gói cả Android & iOS:
+```powershell
+powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deploy.ps1 `
+  -Target all `
+  -Platform all `
+  -Version "1.1.0" `
+  -Notes "Đồng bộ phiên bản lớn 1.1.0 cho toàn bộ hệ thống MDM Parental Control."
+```
 
 ---
 
-## 🔒 4. Nguyên Tắc An Toàn (Safety & Signing Rules)
+## 🔒 5. Danh Mục Tệp Triển Khai & Cấu Hình
 
-1. **Khóa chữ ký (App Signing Key)**:
-   - Các bản release của `target-node` bắt buộc phải được ký bằng cùng một Keystore (`release.keystore` hoặc `debug.keystore` trong giai đoạn dev). Nếu sai chữ ký, Android OS sẽ từ chối silent update của PackageInstaller để bảo vệ thiết bị.
-2. **Kiểm tra trước khi Release**:
-   - `qa-security-perf-specialist` phải đảm bảo APK build sạch, không dính lỗi lint hoặc compiler warning nghiêm trọng trước khi kích hoạt `deploy.ps1`.
+- `.agents/skills/deploy-app/scripts/deploy.ps1`: Kịch bản điều phối tổng thể đa nền tảng.
+- `.agents/skills/deploy-app/scripts/deploy_ios.ps1`: Kịch bản tự động hóa build iOS từ xa qua Mac M1 Pro.
+- `.agents/skills/deploy-app/scripts/send-telegram.ps1`: Tiện ích gửi log tiến trình tới Telegram HUB-LOG / HniBOT.
+- `.agents/skills/deploy-app/templates/manifest.plist.template`: Mẫu Apple OTA Manifest cho iOS Enterprise.
+- `admin-node/ios/ExportOptions-enterprise.plist`: File cấu hình Enterprise manual signing cho xcodebuild.
+- `admin-node/ios/Flutter/Release.xcconfig`: Cấu hình Signing & Bundle ID `com.dhtthni.quanlytaptrung`.
+- `docs/dev/`: Chứa file `.p12`, `.mobileprovision` và `GoogleService-Info.plist`.

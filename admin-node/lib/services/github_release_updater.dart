@@ -2,22 +2,27 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 class GitHubReleaseInfo {
   final String tagName;
   final String title;
-  final String apkDownloadUrl;
+  final String downloadUrl;
   final String releaseNotes;
   final String publishedAt;
   final int assetSize;
+  final bool isIosOta;
+
+  String get apkDownloadUrl => downloadUrl;
 
   GitHubReleaseInfo({
     required this.tagName,
     required this.title,
-    required this.apkDownloadUrl,
+    required this.downloadUrl,
     required this.releaseNotes,
     required this.publishedAt,
     required this.assetSize,
+    this.isIosOta = false,
   });
 }
 
@@ -63,26 +68,33 @@ class ParentAppUpdater {
   /// Lấy phiên bản app hiện tại từ hệ thống
   Future<String> getCurrentAppVersion() async {
     try {
-      final version = await _channel.invokeMethod<String>('getAppVersion');
-      return version ?? '1.2.0';
+      if (Platform.isAndroid) {
+        final version = await _channel.invokeMethod<String>('getAppVersion');
+        return version ?? '1.2.0';
+      }
+      return '1.0.0';
     } catch (_) {
-      return '1.2.0';
+      return '1.0.0';
     }
   }
 
   /// Lấy đường dẫn thư mục bộ nhớ tạm của app
   Future<String> getAppCacheDirectory() async {
     try {
-      final dir = await _channel.invokeMethod<String>('getCacheDirectory');
-      return dir ?? '/data/data/vn.hanoi.khuongnv.vfam.admin/cache';
+      if (Platform.isAndroid) {
+        final dir = await _channel.invokeMethod<String>('getCacheDirectory');
+        return dir ?? '/data/data/vn.hanoi.khuongnv.vfam.admin/cache';
+      }
+      return Directory.systemTemp.path;
     } catch (_) {
-      return '/data/data/vn.hanoi.khuongnv.vfam.admin/cache';
+      return Directory.systemTemp.path;
     }
   }
 
-  /// Kiểm tra bản cập nhật mới nhất từ GitHub Releases
+  /// Kiểm tra bản cập nhật mới nhất từ GitHub Releases phù hợp với nền tảng hiện tại
   Future<GitHubReleaseInfo?> checkForUpdate(String currentVersion) async {
-    final url = Uri.parse('https://api.github.com/repos/$repoOwner/$repoName/releases/latest');
+    // Truy vấn danh sách release gần nhất để lọc theo đúng nền tảng (iOS vs Android)
+    final url = Uri.parse('https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=15');
     try {
       final response = await http.get(
         url,
@@ -93,38 +105,67 @@ class ParentAppUpdater {
       );
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final tagName = data['tag_name'] as String;
-        final name = (data['name'] as String?) ?? tagName;
-        final body = (data['body'] as String?) ?? 'Bản cập nhật tối ưu hóa hiệu năng và vá lỗi.';
-        final publishedAt = (data['published_at'] as String?) ?? '';
+        final releases = jsonDecode(response.body) as List<dynamic>;
+        
+        final isIos = Platform.isIOS;
+        final targetTagPrefix = isIos ? 'admin-ios-v' : 'admin-android-v';
+        final fallbackTagPrefix = isIos ? 'admin-ios' : 'admin-v';
 
-        final assets = (data['assets'] as List<dynamic>?) ?? [];
-        String? downloadUrl;
-        int assetSize = 0;
+        for (final release in releases) {
+          final data = release as Map<String, dynamic>;
+          final tagName = (data['tag_name'] as String? ?? '').trim();
+          
+          // Chỉ chọn bản release dành riêng cho nền tảng hiện hành
+          final isMatch = tagName.startsWith(targetTagPrefix) || (!isIos && tagName.startsWith(fallbackTagPrefix));
+          if (!isMatch) continue;
 
-        for (final asset in assets) {
-          final assetName = (asset['name'] as String).toLowerCase();
-          if (assetName.contains('admin') || assetName.endsWith('.apk')) {
-            downloadUrl = asset['browser_download_url'] as String;
-            assetSize = (asset['size'] as int?) ?? 0;
-            break;
+          final name = (data['name'] as String?) ?? tagName;
+          final body = (data['body'] as String?) ?? 'Bản cập nhật tối ưu hóa hiệu năng và vá lỗi.';
+          final publishedAt = (data['published_at'] as String?) ?? '';
+          final assets = (data['assets'] as List<dynamic>?) ?? [];
+
+          String? downloadUrl;
+          int assetSize = 0;
+
+          if (isIos) {
+            // Trên iOS: Tìm file manifest.plist để tạo link OTA itms-services
+            String? manifestUrl;
+            for (final asset in assets) {
+              final assetName = (asset['name'] as String).toLowerCase();
+              if (assetName == 'manifest.plist') {
+                manifestUrl = asset['browser_download_url'] as String;
+                break;
+              }
+            }
+            // Fallback link manifest nếu chưa có trong assets
+            manifestUrl ??= 'https://github.com/$repoOwner/$repoName/releases/download/$tagName/manifest.plist';
+            downloadUrl = 'itms-services://?action=download-manifest&url=$manifestUrl';
+          } else {
+            // Trên Android: Tìm file APK
+            for (final asset in assets) {
+              final assetName = (asset['name'] as String).toLowerCase();
+              if (assetName.contains('admin') && assetName.endsWith('.apk')) {
+                downloadUrl = asset['browser_download_url'] as String;
+                assetSize = (asset['size'] as int?) ?? 0;
+                break;
+              }
+            }
           }
-        }
 
-        // So sánh tag_name với phiên bản hiện tại bằng SemVer
-        final cleanTag = tagName.replaceAll('v', '').trim();
-        final cleanCurrent = currentVersion.replaceAll('v', '').trim();
+          final cleanTag = tagName.replaceAll(RegExp(r'^[a-zA-Z\-_]+'), '').replaceAll('v', '').trim();
+          final cleanCurrent = currentVersion.replaceAll('v', '').trim();
 
-        if (downloadUrl != null && isNewerVersion(cleanTag, cleanCurrent)) {
-          return GitHubReleaseInfo(
-            tagName: tagName,
-            title: name,
-            apkDownloadUrl: downloadUrl,
-            releaseNotes: body,
-            publishedAt: publishedAt,
-            assetSize: assetSize,
-          );
+          if (downloadUrl != null && isNewerVersion(cleanTag, cleanCurrent)) {
+            return GitHubReleaseInfo(
+              tagName: tagName,
+              title: name,
+              downloadUrl: downloadUrl,
+              releaseNotes: body,
+              publishedAt: publishedAt,
+              assetSize: assetSize,
+              isIosOta: isIos,
+            );
+          }
         }
       }
     } catch (_) {
@@ -133,7 +174,7 @@ class ParentAppUpdater {
     return null;
   }
 
-  /// Tải file APK từ GitHub kèm theo callback theo dõi tiến trình (0.0 - 1.0)
+  /// Tải file APK từ GitHub (dành riêng cho Android)
   Future<File> downloadApk(
     String downloadUrl, {
     required Function(double progress, int receivedBytes, int totalBytes) onProgress,
@@ -177,7 +218,30 @@ class ParentAppUpdater {
     return file;
   }
 
-  /// Gọi Intent mở trình cài đặt APK của Android
+  /// Thực thi cài đặt bản cập nhật:
+  /// - Trên iOS: Mở link OTA itms-services để Apple OS tự động hiện popup cài đặt trực tiếp
+  /// - Trên Android: Gọi PackageInstaller mở file APK
+  Future<bool> executeUpdate(GitHubReleaseInfo release, {File? apkFile}) async {
+    if (release.isIosOta) {
+      final uri = Uri.parse(release.downloadUrl);
+      if (await canLaunchUrl(uri)) {
+        return await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+      return false;
+    } else {
+      if (apkFile == null) return false;
+      try {
+        final success = await _channel.invokeMethod<bool>('installApk', {
+          'filePath': apkFile.absolute.path,
+        });
+        return success ?? false;
+      } catch (e) {
+        rethrow;
+      }
+    }
+  }
+
+  /// Tương thích ngược: Gọi Intent mở trình cài đặt APK của Android
   Future<bool> installApk(File apkFile) async {
     try {
       final success = await _channel.invokeMethod<bool>('installApk', {

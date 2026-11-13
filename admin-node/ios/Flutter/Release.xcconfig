@@ -1,1 +1,10 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
 #include "Generated.xcconfig"
+
+APP_DISPLAY_NAME = VFam Parent
+PRODUCT_BUNDLE_IDENTIFIER = com.dhtthni.quanlytaptrung
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM = JPMH34L85K
+PROVISIONING_PROFILE_SPECIFIER = Prov_HNI_com.dhtthni.quanlytaptrung
+CODE_SIGN_IDENTITY = iPhone Distribution
+CODE_SIGN_IDENTITY[sdk=iphoneos*] = iPhone Distribution
