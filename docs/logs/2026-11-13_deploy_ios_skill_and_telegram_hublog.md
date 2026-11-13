@@ -42,6 +42,8 @@
 - **Bước 6**: Nâng cấp kịch bản điều phối đa nền tảng `.agents/skills/deploy-app/scripts/deploy.ps1`.
 - **Bước 7**: Nâng cấp module In-App Auto Update trên cả Flutter Parent App và Android DO Child App.
 - **Bước 8**: Cập nhật toàn diện tài liệu Skill tại `.agents/skills/deploy-app/SKILL.md`.
+- **Bước 9**: Tích hợp tính năng tạo và gửi kèm mã QR Code cài đặt trực tiếp qua Telegram Bot API `sendPhoto` (`.agents/skills/deploy-app/scripts/send-telegram.ps1`), hỗ trợ cả OTA iOS và trực tiếp APK Android.
+- **Bước 10**: Đã tạo và đẩy file ảnh `vfam-admin-ios-1.4.0-qr.png` lên GitHub Release `admin-ios-v1.4.0` và bắn ảnh QR Code phân giải cao vào kênh **HUB-LOG** qua bot **HniBOT**.
 
 ---
 

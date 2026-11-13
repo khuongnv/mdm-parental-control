@@ -112,10 +112,19 @@ powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deplo
 
 ## 🔒 5. Danh Mục Tệp Triển Khai & Cấu Hình
 
-- `.agents/skills/deploy-app/scripts/deploy.ps1`: Kịch bản điều phối tổng thể đa nền tảng.
-- `.agents/skills/deploy-app/scripts/deploy_ios.ps1`: Kịch bản tự động hóa build iOS từ xa qua Mac M1 Pro.
-- `.agents/skills/deploy-app/scripts/send-telegram.ps1`: Tiện ích gửi log tiến trình tới Telegram HUB-LOG / HniBOT.
+- `.agents/skills/deploy-app/scripts/deploy.ps1`: Kịch bản điều phối tổng thể đa nền tảng (hỗ trợ tạo QR Code cài đặt tự động).
+- `.agents/skills/deploy-app/scripts/deploy_ios.ps1`: Kịch bản tự động hóa build iOS từ xa qua Mac M1 Pro và xuất mã QR Apple OTA.
+- `.agents/skills/deploy-app/scripts/send-telegram.ps1`: Tiện ích gửi log tiến trình và gửi kèm mã QR Code cài đặt (sendPhoto) tới Telegram HUB-LOG / HniBOT.
 - `.agents/skills/deploy-app/templates/manifest.plist.template`: Mẫu Apple OTA Manifest cho iOS Enterprise.
 - `admin-node/ios/ExportOptions-enterprise.plist`: File cấu hình Enterprise manual signing cho xcodebuild.
 - `admin-node/ios/Flutter/Release.xcconfig`: Cấu hình Signing & Bundle ID `com.dhtthni.quanlytaptrung`.
 - `docs/dev/`: Chứa file `.p12`, `.mobileprovision` và `GoogleService-Info.plist`.
+
+---
+
+## 📱 6. Cơ Chế Quét QR Code Cài Đặt Qua Telegram
+
+Mỗi khi hoàn thành phát hành bản build (Android hoặc iOS):
+1. **iOS Enterprise**: Hệ thống tự động tạo mã QR chứa link OTA `itms-services://?action=download-manifest&url=...` trỏ đến `manifest.plist`.
+2. **Android APK**: Hệ thống tự động tạo mã QR chứa link tải trực tiếp APK từ GitHub Releases.
+3. Kịch bản `send-telegram.ps1` sử dụng Telegram API `sendPhoto` để gửi trực tiếp hình ảnh QR Code phân giải cao kèm theo toàn bộ thông tin phiên bản (Version, SHA256, dung lượng, ghi chú) vào kênh **HUB-LOG**. Người dùng chỉ cần mở Camera trên iPhone/iPad hoặc điện thoại Android quét hình ảnh trực tiếp trên màn hình Telegram để cài đặt ngay lập tức.

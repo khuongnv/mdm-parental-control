@@ -1,4 +1,4 @@
-param (
+﻿param (
     [Parameter(Mandatory=$false)]
     [ValidateSet("target", "child", "admin", "all")]
     [string]$Target = "admin",
@@ -51,9 +51,19 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 
 $telegramScript = Join-Path $PSScriptRoot "send-telegram.ps1"
 function Send-TgStep {
-    param([string]$Title, [string]$Message, [string]$Status = "Thành công ✅")
+    param([string]$Title, [string]$Message, [string]$Status = "Thành công ✅", [string]$QrCodeData)
     if (Test-Path $telegramScript) {
-        & $telegramScript -StepTitle $Title -Message $Message -ResultStatus $Status -ChannelId $ChannelId -BotToken $BotToken
+        $tgParams = @{
+            StepTitle = $Title
+            Message = $Message
+            ResultStatus = $Status
+            ChannelId = $ChannelId
+            BotToken = $BotToken
+        }
+        if (-not [string]::IsNullOrWhiteSpace($QrCodeData)) {
+            $tgParams["QrCodeData"] = $QrCodeData
+        }
+        & $telegramScript @tgParams
     }
 }
 
@@ -203,12 +213,28 @@ $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test
 
 if ($ghExe) {
     Write-Host "Publishing GitHub Release via gh CLI..." -ForegroundColor Cyan
+    $ghUrl = "https://github.com/khuongnv/mdm-parental-control/releases/tag/$tag"
+    $primaryDownloadUrl = if ($artifacts.Count -gt 0) {
+        $firstLeaf = Split-Path $artifacts[0] -Leaf
+        "https://github.com/khuongnv/mdm-parental-control/releases/download/$tag/$firstLeaf"
+    } else {
+        $ghUrl
+    }
+
+    # Tạo QR code cục bộ
+    $qrDestPath = Join-Path $releaseDir "$tag-qr.png"
+    try {
+        $escapedDl = [System.Uri]::EscapeDataString($primaryDownloadUrl)
+        $qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=12&data=$escapedDl"
+        Invoke-WebRequest -Uri $qrApiUrl -OutFile $qrDestPath -TimeoutSec 10 -ErrorAction SilentlyContinue
+        if (Test-Path $qrDestPath) { $artifacts += $qrDestPath }
+    } catch {}
+
     $artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
     $cmd = "& `"$ghExe`" release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
     Invoke-Expression $cmd
     Write-Host "GitHub Release created successfully!" -ForegroundColor Green
     
-    $ghUrl = "https://github.com/khuongnv/mdm-parental-control/releases/tag/$tag"
     $summary = @"
 Ứng dụng: <b>$releaseTitle</b>
 • Phiên bản: <b>$Version</b> (Tag: <code>$tag</code>)
@@ -218,7 +244,7 @@ if ($ghExe) {
 🌐 <b>GitHub Release:</b>
 <a href='$ghUrl'>$ghUrl</a>
 "@
-    Send-TgStep -Title "TỔNG KẾT PHÁT HÀNH ANDROID THÀNH CÔNG" -Message $summary -Status "HOÀN TẤT TOÀN DIỆN 🎯"
+    Send-TgStep -Title "TỔNG KẾT PHÁT HÀNH ANDROID THÀNH CÔNG" -Message $summary -Status "HOÀN TẤT TOÀN DIỆN 🎯" -QrCodeData $primaryDownloadUrl
 } else {
     Write-Host "gh CLI not detected. Git tag $tag pushed. APKs saved in release/ directory." -ForegroundColor Yellow
 }

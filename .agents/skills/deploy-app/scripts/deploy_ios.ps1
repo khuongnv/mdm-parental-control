@@ -1,4 +1,4 @@
-param (
+﻿param (
     [Parameter(Mandatory=$false)]
     [string]$Version,
 
@@ -52,9 +52,19 @@ $teamId = "JPMH34L85K"
 
 $telegramScript = Join-Path $PSScriptRoot "send-telegram.ps1"
 function Send-TgStep {
-    param([string]$Title, [string]$Message, [string]$Status = "Thanh cong")
+    param([string]$Title, [string]$Message, [string]$Status = "Thanh cong", [string]$QrCodeData)
     if (Test-Path $telegramScript) {
-        & $telegramScript -StepTitle $Title -Message $Message -ResultStatus $Status -ChannelId $ChannelId -BotToken $BotToken
+        $tgParams = @{
+            StepTitle = $Title
+            Message = $Message
+            ResultStatus = $Status
+            ChannelId = $ChannelId
+            BotToken = $BotToken
+        }
+        if (-not [string]::IsNullOrWhiteSpace($QrCodeData)) {
+            $tgParams["QrCodeData"] = $QrCodeData
+        }
+        & $telegramScript @tgParams
     }
 }
 
@@ -267,20 +277,35 @@ if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
 
 $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
 
+# Tạo mã QR Code cho link OTA cài đặt và lưu file ảnh cục bộ
+$manifestRawUrl = "https://github.com/khuongnv/mdm-parental-control/releases/download/$tag/manifest.plist"
+$otaInstallLink = "itms-services://?action=download-manifest&url=$manifestRawUrl"
+$ghReleaseUrl = "https://github.com/khuongnv/mdm-parental-control/releases/tag/$tag"
+
+$qrDestPath = Join-Path $releaseDir "vfam-admin-ios-$Version-qr.png"
+try {
+    $escapedOta = [System.Uri]::EscapeDataString($otaInstallLink)
+    $qrApiUrl = "https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=12&data=$escapedOta"
+    Invoke-WebRequest -Uri $qrApiUrl -OutFile $qrDestPath -TimeoutSec 10 -ErrorAction SilentlyContinue
+    Write-Host "Da tao anh QR Code cai dat tai: $qrDestPath" -ForegroundColor Green
+} catch {
+    Write-Warning "Khong the tao file anh QR Code cuc bo: $($_.Exception.Message)"
+}
+
 if ($ghExe) {
     Write-Host "Tao GitHub Release qua gh CLI..." -ForegroundColor Cyan
-    & "$ghExe" release create $tag "$destIpa" "$manifestDestPath" --title "$releaseTitle" --notes "$Notes" --verify-tag
+    $releaseFiles = @("$destIpa", "$manifestDestPath")
+    if (Test-Path $qrDestPath) { $releaseFiles += "$qrDestPath" }
+    
+    $fileArgs = $releaseFiles | ForEach-Object { "`"$_`"" }
+    & "$ghExe" release create $tag ($releaseFiles) --title "$releaseTitle" --notes "$Notes" --verify-tag
     Write-Host "GitHub Release da tao thanh cong!" -ForegroundColor Green
-    Send-TgStep -Title $step5Title -Message "Da phat hanh GitHub Release <b>$tag</b> dinh kem tep IPA va manifest.plist thanh cong!" -Status "Thanh cong"
+    Send-TgStep -Title $step5Title -Message "Da phat hanh GitHub Release <b>$tag</b> dinh kem tep IPA, manifest.plist va anh QR Code cai dat thanh cong!" -Status "Thanh cong"
 } else {
     Write-Warning "gh CLI khong kha dung. Da push tag $tag len remote."
 }
 
 # ---------------- BƯỚC 6: TỔNG KẾT & HOÀN TẤT ----------------
-$manifestRawUrl = "https://github.com/khuongnv/mdm-parental-control/releases/download/$tag/manifest.plist"
-$otaInstallLink = "itms-services://?action=download-manifest&url=$manifestRawUrl"
-$ghReleaseUrl = "https://github.com/khuongnv/mdm-parental-control/releases/tag/$tag"
-
 $summaryContent = @"
 Ung dung: <b>VFam Parent Admin (iOS Enterprise)</b> (<code>$bundleId</code>)
 • Phien ban moi: <b>$Version</b> (Git Tag: <code>$tag</code>)
@@ -301,5 +326,5 @@ Write-Host "HOAN TAT PHAT HANH iOS CHO ADMIN-NODE THANH CONG!" -ForegroundColor 
 Write-Host "OTA Link: $otaInstallLink" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 
-Send-TgStep -Title "TONG KET PHAT HANH iOS THANH CONG" -Message $summaryContent -Status "HOAN TAT"
+Send-TgStep -Title "TONG KET PHAT HANH iOS THANH CONG" -Message $summaryContent -Status "HOAN TAT" -QrCodeData $otaInstallLink
 
