@@ -82,3 +82,14 @@
    - `No issues found! (ran in 4.7s)` ✅.
 3. **Compile Kotlin Debug (`./gradlew compileDebugKotlin` trong `target-node`)**:
    - `BUILD SUCCESSFUL in 22s` ✅.
+4. **Phát Hành Toàn Bộ Hệ Thống (All Release v1.5.2)**:
+   - `child-android-v1.5.2`: APK `vfam-child-android-1.5.2.apk` (21.95 MB) phát hành thành công ✅.
+   - `admin-android-v1.5.2`: APK `vfam-admin-android-1.5.2.apk` (31.7 MB) phát hành thành công ✅.
+   - `admin-ios-v1.5.2`: IPA `mdm_admin_app.ipa` (11 MB, SHA256: `840b2a180b1a39e7841de2d4b009185caa8e262258d203581e24079b2eb22366`) + OTA Manifest `manifest.plist` phát hành thành công ✅.
+   - Toàn bộ telemetry và mã QR Code quét cài đặt trực tiếp đã được gửi vào kênh Telegram HUB-LOG.
+
+---
+
+## 5. Kết Luận
+- App Child sau khi nâng cấp lên v1.5.2 (hoặc khi đang ở v1.3.4 kiểm tra cập nhật) sẽ bóc tách chính xác phiên bản `1.5.2` từ tag `child-android-v1.5.2`, không còn bị nhầm sang `v1.3.6`.
+- App Admin iOS Enterprise đã được loại bỏ hoàn toàn lỗi force unwrap `as!`, khởi chạy mượt mà không còn bị crash.
