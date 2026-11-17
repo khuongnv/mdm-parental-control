@@ -7,20 +7,22 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
-    let updaterChannel = FlutterMethodChannel(name: "vn.hanoi.khuongnv.vfam.admin/updater",
-                                              binaryMessenger: controller.binaryMessenger)
-    updaterChannel.setMethodCallHandler({
-      (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
-      if call.method == "getAppVersion" {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.1"
-        result(version)
-      } else {
-        result(FlutterMethodNotImplemented)
-      }
-    })
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
 
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    if let controller = window?.rootViewController as? FlutterViewController {
+      let updaterChannel = FlutterMethodChannel(name: "vn.hanoi.khuongnv.vfam.admin/updater",
+                                                binaryMessenger: controller.binaryMessenger)
+      updaterChannel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
+        if call.method == "getAppVersion" {
+          let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.2"
+          result(version)
+        } else {
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+
+    return result
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {

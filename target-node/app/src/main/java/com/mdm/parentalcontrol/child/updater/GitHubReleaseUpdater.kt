@@ -39,11 +39,18 @@ class GitHubReleaseUpdater @Inject constructor(
      */
     fun isNewerVersion(currentVersion: String, latestTag: String): Boolean {
         try {
-            val curClean = currentVersion.trim().removePrefix("v").split("-")[0]
-            val latClean = latestTag.trim().removePrefix("v").split("-")[0]
+            // Tách phần số phiên bản sau tiền tố (ví dụ: "child-android-v1.5.2" -> "1.5.2", "v1.3.6" -> "1.3.6")
+            val latVerStr = latestTag.split('+').first()
+                .substringAfterLast("-v", latestTag)
+                .removePrefix("v")
+                .trim()
+            val curVerStr = currentVersion.split('+').first()
+                .substringAfterLast("-v", currentVersion)
+                .removePrefix("v")
+                .trim()
 
-            val curParts = curClean.split(".").map { it.toIntOrNull() ?: 0 }
-            val latParts = latClean.split(".").map { it.toIntOrNull() ?: 0 }
+            val curParts = curVerStr.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+            val latParts = latVerStr.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
 
             val maxLen = maxOf(curParts.size, latParts.size)
             for (i in 0 until maxLen) {

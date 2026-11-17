@@ -34,8 +34,8 @@ void main() {
     test('Old hardcoded 1.3.4 vs 1.5.0 release', () {
       // Confirms why old code was triggering update:
       expect(ParentAppUpdater.isNewerVersion('admin-ios-v1.5.0', '1.3.4'), isTrue);
-      // With our fix, when app is at 1.5.1:
-      expect(ParentAppUpdater.isNewerVersion('admin-ios-v1.5.1', ParentAppUpdater.appVersion), isFalse);
+      // With our fix, when app is at 1.5.2:
+      expect(ParentAppUpdater.isNewerVersion('admin-ios-v1.5.2', ParentAppUpdater.appVersion), isFalse);
     });
   });
 }
