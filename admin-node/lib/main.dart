@@ -3263,7 +3263,7 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  String currentVersion = '1.3.4';
+  String currentVersion = ParentAppUpdater.appVersion;
   bool isCheckingUpdate = false;
   double? downloadProgress;
 

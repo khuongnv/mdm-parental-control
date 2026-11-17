@@ -115,22 +115,44 @@ if ($Platform -eq "ios") {
     exit $LASTEXITCODE
 }
 
+# Nếu yêu cầu phát hành toàn bộ (all): Tuần tự phát hành Child Android, Admin Android và Admin iOS
+if ($Target -eq "all") {
+    Write-Host "==========================================================" -ForegroundColor Cyan
+    Write-Host "KHỞI ĐỘNG PHÁT HÀNH TOÀN BỘ HỆ THỐNG (ALL)" -ForegroundColor Cyan
+    Write-Host "Version: $Version" -ForegroundColor Cyan
+    Write-Host "==========================================================" -ForegroundColor Cyan
+
+    Write-Host ">>> 1/3: PHÁT HÀNH CHILD DO AGENT (ANDROID)..." -ForegroundColor Yellow
+    & $PSCommandPath -Target child -Platform android -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
+    if ($LASTEXITCODE -ne 0) { throw "Phát hành Child Android thất bại với exit code $LASTEXITCODE" }
+
+    Write-Host ">>> 2/3: PHÁT HÀNH PARENT ADMIN (ANDROID)..." -ForegroundColor Yellow
+    & $PSCommandPath -Target admin -Platform android -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
+    if ($LASTEXITCODE -ne 0) { throw "Phát hành Admin Android thất bại với exit code $LASTEXITCODE" }
+
+    if ($Platform -eq "all" -or $Platform -eq "ios") {
+        Write-Host ">>> 3/3: PHÁT HÀNH PARENT ADMIN (IOS ENTERPRISE)..." -ForegroundColor Yellow
+        $iosScript = Join-Path $PSScriptRoot "deploy_ios.ps1"
+        & $iosScript -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
+        if ($LASTEXITCODE -ne 0) { throw "Phát hành Admin iOS thất bại với exit code $LASTEXITCODE" }
+    }
+
+    Write-Host "==========================================================" -ForegroundColor Green
+    Write-Host "HOÀN TẤT PHÁT HÀNH TOÀN BỘ HỆ THỐNG PHIÊN BẢN v$Version!" -ForegroundColor Green
+    Write-Host "==========================================================" -ForegroundColor Green
+    exit 0
+}
+
 # Xác định chuẩn hóa Target
-$normTarget = if ($Target -eq "target" -or $Target -eq "child") { "child" } elseif ($Target -eq "admin") { "admin" } else { "all" }
+$normTarget = if ($Target -eq "target" -or $Target -eq "child") { "child" } else { "admin" }
 
 # Xác định tag chuẩn phân biệt nền tảng và app
-$tag = if ($normTarget -eq "all") {
-    "v$Version"
-} else {
-    "$normTarget-$Platform-v$Version"
-}
+$tag = "$normTarget-$Platform-v$Version"
 
 $releaseTitle = if ($normTarget -eq "child") {
     "VFam Child Agent (Android) Release v$Version"
-} elseif ($normTarget -eq "admin") {
-    "VFam Parent Admin (Android) Release v$Version"
 } else {
-    "VFam Parental Control Release v$Version"
+    "VFam Parent Admin (Android) Release v$Version"
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan

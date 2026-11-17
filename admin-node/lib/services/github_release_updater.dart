@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -37,17 +38,25 @@ class ParentAppUpdater {
     this.repoName = 'mdm-parental-control',
   });
 
+  static const String appVersion = '1.5.1';
+
   /// So sánh Semantic Versioning (SemVer)
   /// Chỉ trả về true nếu phiên bản remote lớn hơn phiên bản hiện tại
   static bool isNewerVersion(String remoteTag, String currentVersion) {
-    final remoteNumbers = remoteTag
+    // Tách bỏ tiền tố và phần build number (+...)
+    final cleanRemoteStr = remoteTag.split('+').first;
+    final cleanCurrentStr = currentVersion.split('+').first;
+
+    final remoteNumbers = cleanRemoteStr
         .replaceAll(RegExp(r'[^\d.]'), '')
         .split('.')
+        .where((s) => s.isNotEmpty)
         .map((s) => int.tryParse(s) ?? 0)
         .toList();
-    final localNumbers = currentVersion
+    final localNumbers = cleanCurrentStr
         .replaceAll(RegExp(r'[^\d.]'), '')
         .split('.')
+        .where((s) => s.isNotEmpty)
         .map((s) => int.tryParse(s) ?? 0)
         .toList();
 
@@ -65,17 +74,17 @@ class ParentAppUpdater {
     return false;
   }
 
-  /// Lấy phiên bản app hiện tại từ hệ thống
+  /// Lấy phiên bản app hiện tại từ hệ thống (hỗ trợ cả Android và iOS)
   Future<String> getCurrentAppVersion() async {
     try {
-      if (Platform.isAndroid) {
-        final version = await _channel.invokeMethod<String>('getAppVersion');
-        return version ?? '1.2.0';
+      final version = await _channel.invokeMethod<String>('getAppVersion');
+      if (version != null && version.trim().isNotEmpty) {
+        return version.trim();
       }
-      return '1.0.0';
-    } catch (_) {
-      return '1.0.0';
+    } catch (e) {
+      debugPrint('Error getting native app version: $e');
     }
+    return appVersion;
   }
 
   /// Lấy đường dẫn thư mục bộ nhớ tạm của app
