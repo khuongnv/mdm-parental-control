@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-17 | [`2026-11-17_deploy_v1.5.3_all.md`](./2026-11-17_deploy_v1.5.3_all.md) | Phát hành toàn bộ ứng dụng v1.5.3 (Android Child DO Build 14, Android Admin Build 12, iOS Enterprise Build 12) | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-17 | [`2026-11-17_fix_child_device_owner_silent_update.md`](./2026-11-17_fix_child_device_owner_silent_update.md) | Khắc phục lỗi cập nhật tự động (Silent Update) trên Child App Android 12+ (SessionParams & Fallback Intent) | `device-owner-specialist`, `lead-architect` | ✅ Hoàn thành |
 | 2026-11-17 | [`2026-11-17_fix_child_version_detection_and_ios_admin_crash.md`](./2026-11-17_fix_child_version_detection_and_ios_admin_crash.md) | Sửa thuật toán so sánh SemVer máy con (nhận diện đúng v1.5.2) & Sửa triệt để crash khởi chạy iOS Admin | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-17 | [`2026-11-17_update_app_icons_and_fix_admin_version_check.md`](./2026-11-17_update_app_icons_and_fix_admin_version_check.md) | Cập nhật icon 2 app (Child DO & Admin Phụ Huynh đa nền tảng) & Sửa lỗi version check lặp vô tận app Admin | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
