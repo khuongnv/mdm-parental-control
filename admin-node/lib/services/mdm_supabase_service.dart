@@ -5,28 +5,33 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class MdmSupabaseService {
   static const String defaultUrl = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://ueamgqbxgyzxruzzjofm.supabase.co',
+    defaultValue: '',
   );
   static const String defaultAnonKey = String.fromEnvironment(
     'SUPABASE_ANON_KEY',
-    defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlYW1ncWJ4Z3l6eHJ1enpqb2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1MjQyMjAsImV4cCI6MjEwOTEwMDIyMH0.D7qTyUR-_fAMZMrjZejKuX06ZycZsMMq-9zKBpBGFFc',
+    defaultValue: '',
   );
 
   static SupabaseClient get client => Supabase.instance.client;
 
   /// Khởi tạo Supabase SDK
   static Future<void> initialize({String? url, String? anonKey}) async {
+    final effectiveUrl = url ?? defaultUrl;
+    final effectiveAnonKey = anonKey ?? defaultAnonKey;
+    if (effectiveUrl.isEmpty || effectiveAnonKey.isEmpty) {
+      debugPrint('⚠️ Supabase URL hoặc Anon Key chưa được cấu hình (--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...).');
+      return;
+    }
     // ignore: deprecated_member_use
     await Supabase.initialize(
-      url: url ?? defaultUrl,
+      url: effectiveUrl,
       // ignore: deprecated_member_use
-      anonKey: anonKey ?? defaultAnonKey,
+      anonKey: effectiveAnonKey,
       realtimeClientOptions: const RealtimeClientOptions(
         eventsPerSecond: 10,
       ),
     );
-    debugPrint('⚡ Supabase initialized successfully: ${url ?? defaultUrl}');
+    debugPrint('⚡ Supabase initialized successfully: $effectiveUrl');
   }
 
   /// Đảm bảo người dùng đã có phiên xác thực (hỗ trợ Anonymous auth nếu chưa đăng nhập)
@@ -223,18 +228,9 @@ class MdmSupabaseService {
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }).eq('id', deviceId);
 
-    // 3. Phát thông điệp Broadcast
+    // 3. Phát thông điệp Broadcast duy nhất một lần
     try {
       final channel = client.channel('device:$deviceId');
-      channel.sendBroadcastMessage(
-        event: 'GRANT_EXTRA_TIME',
-        payload: {
-          'device_id': deviceId,
-          'extra_minutes': extraMinutes,
-          'total_extra_minutes': newExtra,
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        },
-      );
       channel.subscribe((status, [error]) async {
         if (status == RealtimeSubscribeStatus.subscribed) {
           await channel.sendBroadcastMessage(
@@ -351,6 +347,18 @@ class MdmSupabaseService {
     } catch (e) {
       debugPrint('⚠️ Error sending adjust screen time broadcast: $e');
     }
+
+    // Dự phòng gửi FCM Silent High-Priority Push (đặc biệt khi máy con đang tắt màn hình)
+    try {
+      await client.functions.invoke('send-fcm-command', body: {
+        'device_id': deviceId,
+        'action': 'ADJUST_SCREEN_TIME',
+        'delta_minutes': deltaMinutes,
+        'reason': reason ?? (deltaMinutes >= 0 ? 'Thưởng giờ chơi' : 'Phạt trừ giờ chơi'),
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error invoking send-fcm-command for ADJUST_SCREEN_TIME: $e');
+    }
   }
 
   /// Hủy quyền quản lý thiết bị (P2-ADMIN-03)
@@ -458,11 +466,11 @@ class MdmSupabaseService {
   }
 
   /// Tạo mã mời Co-Admin 6 số / QR (P2-ADMIN-04)
-  Future<Map<String, dynamic>> createFamilyInvite({String role = 'parent'}) async {
-    final familyId = await getOrCreateFamily();
+  Future<Map<String, dynamic>> createFamilyInvite({String? familyId, String role = 'parent'}) async {
+    final famId = familyId ?? await getOrCreateFamily();
     try {
       final res = await client.rpc('create_family_invite', params: {
-        'p_family_id': familyId,
+        'p_family_id': famId,
         'p_role': role,
       });
       if (res is Map<String, dynamic>) return res;
@@ -472,23 +480,172 @@ class MdmSupabaseService {
     final code = 'FAM-${(1000 + DateTime.now().millisecond).toString()}';
     return {
       'invite_code': code,
-      'family_id': familyId,
+      'family_id': famId,
       'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
     };
   }
 
   /// Nhập mã tham gia gia đình Co-Admin (P2-ADMIN-04)
-  Future<Map<String, dynamic>> joinFamilyByCode(String code) async {
+  Future<Map<String, dynamic>> joinFamilyByCode(String code, {String displayName = 'Phụ huynh'}) async {
     await ensureAuthenticatedUser();
     try {
-      final res = await client.rpc('join_family_by_code', params: {
+      final res = await client.rpc('join_family_by_code_v2', params: {
         'p_invite_code': code.trim(),
+        'p_display_name': displayName.trim(),
       });
       if (res is Map<String, dynamic>) return res;
-    } catch (e) {
-      throw Exception('Mã mời không hợp lệ hoặc đã hết hạn: $e');
+    } catch (_) {
+      try {
+        final res = await client.rpc('join_family_by_code', params: {
+          'p_invite_code': code.trim(),
+        });
+        if (res is Map<String, dynamic>) return res;
+      } catch (e) {
+        throw Exception('Mã mời không hợp lệ hoặc đã hết hạn: $e');
+      }
     }
     return {'success': true, 'message': 'Tham gia gia đình thành công'};
+  }
+
+  /// Tạo gia đình mới (Family Management)
+  Future<Map<String, dynamic>> createNewFamily({
+    required String familyName,
+    String displayName = 'Chủ gia đình',
+  }) async {
+    await ensureAuthenticatedUser();
+    try {
+      final res = await client.rpc('create_new_family', params: {
+        'p_family_name': familyName.trim(),
+        'p_display_name': displayName.trim(),
+      });
+      if (res is Map<String, dynamic>) return res;
+    } catch (_) {}
+
+    // Fallback direct create
+    final user = client.auth.currentUser;
+    final fam = await client.from('families').insert({
+      'name': familyName.trim(),
+      'created_by': user?.id,
+    }).select().single();
+
+    final famId = fam['id'] as String;
+    if (user != null) {
+      await client.from('family_members').upsert({
+        'family_id': famId,
+        'user_id': user.id,
+        'role': 'owner',
+        'display_name': displayName.trim(),
+      });
+    }
+
+    return {
+      'success': true,
+      'family_id': famId,
+      'family_name': familyName,
+      'role': 'owner',
+      'display_name': displayName,
+    };
+  }
+
+  /// Lấy danh sách gia đình của user hiện tại
+  Future<List<Map<String, dynamic>>> getMyFamilies() async {
+    await ensureAuthenticatedUser();
+    try {
+      final res = await client.rpc('get_my_families');
+      if (res is List) {
+        return List<Map<String, dynamic>>.from(res);
+      }
+    } catch (_) {}
+
+    // Fallback direct query
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) return [];
+      final members = await client
+          .from('family_members')
+          .select('family_id, role, display_name, families(id, name, created_at)')
+          .eq('user_id', user.id);
+
+      final list = <Map<String, dynamic>>[];
+      for (final m in members) {
+        final fam = m['families'] as Map<String, dynamic>?;
+        if (fam != null) {
+          list.add({
+            'id': fam['id'],
+            'name': fam['name'],
+            'role': m['role'],
+            'display_name': m['display_name'] ?? 'Phụ huynh',
+            'created_at': fam['created_at'],
+            'is_owner': m['role'] == 'owner',
+          });
+        }
+      }
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Lấy chi tiết một gia đình gồm phụ huynh & thiết bị con
+  Future<Map<String, dynamic>> getFamilyDetails(String familyId) async {
+    await ensureAuthenticatedUser();
+    try {
+      final res = await client.rpc('get_family_details', params: {
+        'p_family_id': familyId,
+      });
+      if (res is Map<String, dynamic>) return res;
+    } catch (_) {}
+
+    // Fallback direct query
+    final fam = await client.from('families').select().eq('id', familyId).single();
+    final parents = await client.from('family_members').select().eq('family_id', familyId);
+    final devices = await client.from('devices').select().eq('family_id', familyId);
+
+    return {
+      'family_id': familyId,
+      'family_name': fam['name'],
+      'created_at': fam['created_at'],
+      'is_owner': fam['created_by'] == client.auth.currentUser?.id,
+      'parents': parents,
+      'devices': devices,
+    };
+  }
+
+  /// Cập nhật tên gia đình
+  Future<void> updateFamilyName(String familyId, String newName) async {
+    await ensureAuthenticatedUser();
+    try {
+      await client.rpc('update_family_name', params: {
+        'p_family_id': familyId,
+        'p_name': newName.trim(),
+      });
+      return;
+    } catch (_) {}
+
+    await client.from('families').update({
+      'name': newName.trim(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', familyId);
+  }
+
+  /// Xóa thành viên phụ huynh hoặc tự rời gia đình
+  Future<Map<String, dynamic>> removeFamilyMember(String familyId, String memberUserId) async {
+    await ensureAuthenticatedUser();
+    try {
+      final res = await client.rpc('remove_family_member', params: {
+        'p_family_id': familyId,
+        'p_target_user_id': memberUserId,
+      });
+      if (res is Map<String, dynamic>) return res;
+    } catch (_) {}
+
+    await client
+        .from('family_members')
+        .delete()
+        .eq('family_id', familyId)
+        .eq('user_id', memberUserId);
+
+    return {'success': true, 'message': 'Đã xóa thành viên'};
   }
 
   /// Cập nhật quy tắc giới hạn giờ (Ngày / Tuần & Hạn mức) (P2-ADMIN-05)

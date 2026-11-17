@@ -19,6 +19,7 @@ class MdmDeviceAdminReceiver : DeviceAdminReceiver() {
         if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             applyAntiTamperingPolicies(context)
             startUsageTrackingService(context)
+            MidnightResetReceiver.scheduleNextMidnightAlarm(context)
         }
     }
 

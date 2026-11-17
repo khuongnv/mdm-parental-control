@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>VFam cần quyền truy cập camera để quét mã QR ghép nối thiết bị của con và thêm thành viên gia đình.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>VFam cần quyền truy cập thư viện ảnh để quét mã QR từ ảnh đã lưu.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

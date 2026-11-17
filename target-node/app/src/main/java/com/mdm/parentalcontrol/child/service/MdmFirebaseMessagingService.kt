@@ -65,12 +65,12 @@ class MdmFirebaseMessagingService : FirebaseMessagingService() {
                 handlePanicLockdown(isLocked)
             }
             ACTION_GRANT_EXTRA_TIME, ACTION_ADJUST_TIME -> {
-                val extraMinutes = data["extra_minutes"]?.toIntOrNull()
-                    ?: data["delta_minutes"]?.toIntOrNull() ?: 15
+                val deltaMinutes = data["delta_minutes"]?.toIntOrNull()
+                    ?: data["extra_minutes"]?.toIntOrNull() ?: 15
                 val reason = data["reason"]
-                Log.i(TAG, "⏳ Granting extra time via FCM: +$extraMinutes mins")
-                ChildNotificationHelper.showTimeAdjustedNotification(this, extraMinutes, reason)
-                handleGrantExtraTime(extraMinutes)
+                Log.i(TAG, "⚡ FCM adjustment received: delta=$deltaMinutes mins, reason=$reason")
+                ChildNotificationHelper.showTimeAdjustedNotification(this, deltaMinutes, reason)
+                handleAdjustTime(deltaMinutes)
             }
             ACTION_REMOTE_MESSAGE -> {
                 val msgId = data["message_id"] ?: System.currentTimeMillis().toString()
@@ -86,7 +86,7 @@ class MdmFirebaseMessagingService : FirebaseMessagingService() {
                 Log.i(TAG, "✅ Received TIME_REQUEST_RESOLVED via FCM: $status (+$granted min)")
                 ChildNotificationHelper.showTimeRequestResolvedNotification(this, status, granted)
                 if (status == "approved" && granted > 0) {
-                    handleGrantExtraTime(granted)
+                    handleAdjustTime(granted)
                 }
             }
             ACTION_SYNC_POLICY -> {
@@ -129,11 +129,39 @@ class MdmFirebaseMessagingService : FirebaseMessagingService() {
         wakeUpTrackingService()
     }
 
-    private fun handleGrantExtraTime(extraMinutes: Int) {
+    private fun handleAdjustTime(deltaMinutes: Int) {
         serviceScope.launch {
             val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
-            val newTotalLimit = currentPolicy.dailyLimitMinutes + extraMinutes
-            usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = newTotalLimit))
+            val newLimit = (currentPolicy.dailyLimitMinutes + deltaMinutes).coerceAtLeast(0)
+            usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = newLimit, isEmergencyLockdown = false))
+
+            // Nếu phạt trừ giờ khiến đã vượt quota hôm nay, suspend ngay lập tức
+            val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+            val totalMs = usageDao.getTotalScreenTimeMs(today) ?: 0L
+            val totalMinutes = totalMs / (1000 * 60)
+            if (totalMinutes >= newLimit) {
+                val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+                val admin = ComponentName(this@MdmFirebaseMessagingService, MdmDeviceAdminReceiver::class.java)
+                if (dpm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isDeviceOwnerApp(packageName)) {
+                    val emergencyWhitelist = setOf(
+                        packageName,
+                        "com.android.phone",
+                        "com.android.server.telecom",
+                        "com.google.android.dialer",
+                        "com.android.emergency"
+                    )
+                    val toSuspend = packageManager.getInstalledApplications(0)
+                        .map { it.packageName }
+                        .filter { it !in emergencyWhitelist }
+                        .toTypedArray()
+                    try {
+                        dpm.setPackagesSuspended(admin, toSuspend, true)
+                        Log.i(TAG, "Device Owner: Suspended ${toSuspend.size} packages after quota penalty via FCM")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to suspend packages", e)
+                    }
+                }
+            }
         }
         wakeUpTrackingService()
     }

@@ -1,4 +1,19 @@
-﻿param (
+﻿<#
+.SYNOPSIS
+    Kịch bản tự động hóa điều phối build, đóng gói và phát hành ứng dụng đa nền tảng (Android & iOS).
+.DESCRIPTION
+    Hỗ trợ phát hành:
+    - Child DO Agent (Android): vfam-child-android-v<X.Y.Z>
+    - Parent Admin (Android): vfam-admin-android-v<X.Y.Z>
+    - Parent Admin (iOS Enterprise): admin-ios-v<X.Y.Z>
+    - Toàn bộ hệ thống: -Target all -Platform all
+    Tích hợp tự động hóa:
+    - Đóng gói APK / IPA
+    - Tạo mã QR Code cài đặt
+    - Đẩy GitHub Releases
+    - Giám sát Telegram HUB-LOG thời gian thực
+#>
+param (
     [Parameter(Mandatory=$false)]
     [ValidateSet("target", "child", "admin", "all")]
     [string]$Target = "admin",
@@ -14,10 +29,10 @@
     [string]$Notes = "Bản phát hành ứng dụng hệ thống MDM Parental Control.",
 
     [Parameter(Mandatory=$false)]
-    [string]$ChannelId = "-1003609918702",
+    [string]$ChannelId = "",
 
     [Parameter(Mandatory=$false)]
-    [string]$BotToken = "8005142785:AAHSrJ2Yp4l0Gj6Yk7iu8hwSwThZIiVKrCU"
+    [string]$BotToken = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +43,25 @@ try {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..\..")).Path
 Set-Location $repoRoot
+
+# Tự động nạp cấu hình từ .env tại repo root nếu có
+$envFile = Join-Path $repoRoot ".env"
+if (Test-Path $envFile) {
+    Get-Content $envFile | Where-Object { $_ -match "^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$" } | ForEach-Object {
+        $varName = $matches[1]
+        $varVal = $matches[2].Trim('"', "'", " ")
+        if (-not [Environment]::GetEnvironmentVariable($varName)) {
+            [Environment]::SetEnvironmentVariable($varName, $varVal, "Process")
+        }
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($ChannelId)) {
+    $ChannelId = if ($env:TELEGRAM_CHANNEL_ID) { $env:TELEGRAM_CHANNEL_ID } else { "" }
+}
+if ([string]::IsNullOrWhiteSpace($BotToken)) {
+    $BotToken = if ($env:TELEGRAM_BOT_TOKEN) { $env:TELEGRAM_BOT_TOKEN } else { "" }
+}
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $adminPubspecPath = Join-Path $repoRoot "admin-node\pubspec.yaml"
@@ -51,17 +85,24 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 
 $telegramScript = Join-Path $PSScriptRoot "send-telegram.ps1"
 function Send-TgStep {
-    param([string]$Title, [string]$Message, [string]$Status = "Thành công ✅", [string]$QrCodeData)
+    param([string]$Title, [string]$Message, [string]$Status = "Thành công", [string]$QrCodeData, [string]$PhotoPath)
     if (Test-Path $telegramScript) {
         $tgParams = @{
             StepTitle = $Title
             Message = $Message
             ResultStatus = $Status
-            ChannelId = $ChannelId
-            BotToken = $BotToken
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ChannelId)) {
+            $tgParams["ChannelId"] = $ChannelId
+        }
+        if (-not [string]::IsNullOrWhiteSpace($BotToken)) {
+            $tgParams["BotToken"] = $BotToken
         }
         if (-not [string]::IsNullOrWhiteSpace($QrCodeData)) {
             $tgParams["QrCodeData"] = $QrCodeData
+        }
+        if (-not [string]::IsNullOrWhiteSpace($PhotoPath)) {
+            $tgParams["PhotoPath"] = $PhotoPath
         }
         & $telegramScript @tgParams
     }
@@ -93,13 +134,13 @@ $releaseTitle = if ($normTarget -eq "child") {
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "🚀 KHỞI ĐỘNG CI/CD BUILD & DEPLOY ANDROID" -ForegroundColor Cyan
+Write-Host "KHỞI ĐỘNG CI/CD BUILD & DEPLOY ANDROID" -ForegroundColor Cyan
 Write-Host "Target: $normTarget | Platform: $Platform | Tag: $tag | Version: $Version" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 Send-TgStep -Title "Khởi động phát hành Android ($normTarget)" `
-    -Message "Mục tiêu: $normTarget | Nền tảng: $Platform`nPhiên bản: $Version`nGit Tag: <code>$tag</code>" `
-    -Status "Đang chuẩn bị môi trường... ⏳"
+    -Message "Mục tiêu: <b>$normTarget</b> | Nền tảng: <b>$Platform</b>`nPhiên bản: <b>v$Version</b> (Git Tag: <code>$tag</code>)" `
+    -Status "Đang chuẩn bị môi trường..."
 
 $artifacts = @()
 $releaseDir = Join-Path $repoRoot "release"
@@ -111,9 +152,9 @@ if (-not (Test-Path $releaseDir)) {
 if ($normTarget -eq "child" -or $normTarget -eq "all") {
     Send-TgStep -Title "Biên dịch Target Node (Child DO Agent)" `
         -Message "Đang đồng bộ version $Version và chạy gradle assembleDebug..." `
-        -Status "Đang biên dịch... ⏳"
+        -Status "Đang biên dịch..."
 
-    Write-Host "Syncing Target Node version to $Version..." -ForegroundColor Cyan
+    Write-Host "Đồng bộ version Target Node lên $Version..." -ForegroundColor Cyan
     $targetGradlePath = Join-Path $repoRoot "target-node\app\build.gradle.kts"
     if (Test-Path $targetGradlePath) {
         $gradleContent = Get-Content -Path $targetGradlePath -Raw -Encoding UTF8
@@ -121,13 +162,13 @@ if ($normTarget -eq "child" -or $normTarget -eq "all") {
         Set-Content -Path $targetGradlePath -Value $gradleContent -Encoding UTF8 -NoNewline
     }
 
-    Write-Host "Building Target Node (VFam Child)..." -ForegroundColor Yellow
+    Write-Host "Biên dịch Target Node (VFam Child)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "target-node")
     Remove-Item -Path (Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk") -Force -ErrorAction SilentlyContinue
 
     .\gradlew.bat assembleDebug
     if ($LASTEXITCODE -ne 0) {
-        Send-TgStep -Title "Biên dịch Target Node" -Message "Gradle build failed with exit code $LASTEXITCODE" -Status "Lỗi ❌"
+        Send-TgStep -Title "Biên dịch Target Node" -Message "Gradle build thất bại với exit code $LASTEXITCODE" -Status "Lỗi ❌"
         throw "Target Node build failed with exit code $LASTEXITCODE"
     }
     
@@ -137,10 +178,10 @@ if ($normTarget -eq "child" -or $normTarget -eq "all") {
         Copy-Item -Path $targetApkPath -Destination $destTargetApk -Force
         $artifacts += $destTargetApk
         $childSize = [math]::Round((Get-Item $destTargetApk).Length / 1MB, 2)
-        Write-Host "Target Node APK ready: $destTargetApk ($childSize MB)" -ForegroundColor Green
-        Send-TgStep -Title "Biên dịch Target Node hoàn tất" -Message "Đã tạo file APK: vfam-child-android-$Version.apk ($childSize MB)" -Status "Thành công ✅"
+        Write-Host "Target Node APK đã sẵn sàng: $destTargetApk ($childSize MB)" -ForegroundColor Green
+        Send-TgStep -Title "Biên dịch Target Node hoàn tất" -Message "Đã xuất file APK: <code>vfam-child-android-$Version.apk</code> ($childSize MB)" -Status "Thành công"
     } else {
-        throw "Target Node APK not found!"
+        throw "Không tìm thấy file APK của Target Node!"
     }
 }
 
@@ -148,9 +189,9 @@ if ($normTarget -eq "child" -or $normTarget -eq "all") {
 if ($normTarget -eq "admin" -or $normTarget -eq "all") {
     Send-TgStep -Title "Biên dịch Admin Node (Parent Flutter Android)" `
         -Message "Đang cập nhật pubspec.yaml và chạy flutter build apk --release..." `
-        -Status "Đang biên dịch... ⏳"
+        -Status "Đang biên dịch..."
 
-    Write-Host "Syncing Admin Node version to $Version..." -ForegroundColor Cyan
+    Write-Host "Đồng bộ version Admin Node lên $Version..." -ForegroundColor Cyan
     $adminPubspecPath = Join-Path $repoRoot "admin-node\pubspec.yaml"
     if (Test-Path $adminPubspecPath) {
         $pubContent = Get-Content -Path $adminPubspecPath -Raw -Encoding UTF8
@@ -158,14 +199,22 @@ if ($normTarget -eq "admin" -or $normTarget -eq "all") {
         Set-Content -Path $adminPubspecPath -Value $pubContent -Encoding UTF8 -NoNewline
     }
 
-    Write-Host "Building Admin Node (VFam Admin Android)..." -ForegroundColor Yellow
+    Write-Host "Biên dịch Admin Node (VFam Admin Android)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "admin-node")
     Remove-Item -Path (Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-release.apk") -Force -ErrorAction SilentlyContinue
     Remove-Item -Path (Join-Path $repoRoot "admin-node\build\app\outputs\apk\release\app-release.apk") -Force -ErrorAction SilentlyContinue
 
-    flutter build apk --release
+    $flutterArgs = @("build", "apk", "--release")
+    if ($env:SUPABASE_URL) {
+        $flutterArgs += "--dart-define=SUPABASE_URL=$($env:SUPABASE_URL)"
+    }
+    if ($env:SUPABASE_ANON_KEY) {
+        $flutterArgs += "--dart-define=SUPABASE_ANON_KEY=$($env:SUPABASE_ANON_KEY)"
+    }
+
+    & flutter @flutterArgs
     if ($LASTEXITCODE -ne 0) {
-        Send-TgStep -Title "Biên dịch Admin Node" -Message "flutter build apk failed with exit code $LASTEXITCODE" -Status "Lỗi ❌"
+        Send-TgStep -Title "Biên dịch Admin Node" -Message "Flutter build apk thất bại với exit code $LASTEXITCODE" -Status "Lỗi ❌"
         throw "flutter build apk --release failed with exit code $LASTEXITCODE"
     }
     
@@ -178,10 +227,10 @@ if ($normTarget -eq "admin" -or $normTarget -eq "all") {
         Copy-Item -Path $adminApkPath -Destination $destAdminApk -Force
         $artifacts += $destAdminApk
         $adminSize = [math]::Round((Get-Item $destAdminApk).Length / 1MB, 2)
-        Write-Host "Admin Node APK ready: $destAdminApk ($adminSize MB)" -ForegroundColor Green
-        Send-TgStep -Title "Biên dịch Admin Node hoàn tất" -Message "Đã tạo file APK: vfam-admin-android-$Version.apk ($adminSize MB)" -Status "Thành công ✅"
+        Write-Host "Admin Node APK đã sẵn sàng: $destAdminApk ($adminSize MB)" -ForegroundColor Green
+        Send-TgStep -Title "Biên dịch Admin Node hoàn tất" -Message "Đã xuất file APK: <code>vfam-admin-android-$Version.apk</code> ($adminSize MB)" -Status "Thành công"
     } else {
-        throw "Admin Node APK not found!"
+        throw "Không tìm thấy file APK của Admin Node!"
     }
 }
 
@@ -195,11 +244,11 @@ if ($status) {
     git push origin main
 }
 
-Write-Host "Creating git tag $tag" -ForegroundColor Cyan
+Write-Host "Tạo git tag $tag..." -ForegroundColor Cyan
 git tag -a $tag -m "$releaseTitle" -f
 git push origin $tag -f
 
-# 4. GITHUB RELEASE
+# 4. GITHUB RELEASE & QR CODE
 if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
     try {
         $credOut = ("protocol=https`nhost=github.com`n`n" | git credential fill | Out-String)
@@ -212,7 +261,7 @@ if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
 $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
 
 if ($ghExe) {
-    Write-Host "Publishing GitHub Release via gh CLI..." -ForegroundColor Cyan
+    Write-Host "Phát hành GitHub Release qua gh CLI..." -ForegroundColor Cyan
     $ghUrl = "https://github.com/khuongnv/mdm-parental-control/releases/tag/$tag"
     $primaryDownloadUrl = if ($artifacts.Count -gt 0) {
         $firstLeaf = Split-Path $artifacts[0] -Leaf
@@ -221,7 +270,7 @@ if ($ghExe) {
         $ghUrl
     }
 
-    # Tạo QR code cục bộ
+    # Tạo file ảnh QR Code cục bộ
     $qrDestPath = Join-Path $releaseDir "$tag-qr.png"
     try {
         $escapedDl = [System.Uri]::EscapeDataString($primaryDownloadUrl)
@@ -233,20 +282,24 @@ if ($ghExe) {
     $artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
     $cmd = "& `"$ghExe`" release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
     Invoke-Expression $cmd
-    Write-Host "GitHub Release created successfully!" -ForegroundColor Green
+    Write-Host "GitHub Release đã tạo thành công!" -ForegroundColor Green
     
+    # Bảng tổng kết kết hợp ảnh QR Code gửi 1 tin duy nhất
     $summary = @"
-Ứng dụng: <b>$releaseTitle</b>
-• Phiên bản: <b>$Version</b> (Tag: <code>$tag</code>)
-• Nền tảng: <b>Android</b>
-• Tệp đính kèm: $(($artifacts | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')
-• Ghi chú: $Notes
-🌐 <b>GitHub Release:</b>
-<a href='$ghUrl'>$ghUrl</a>
+📱 <b>Ứng dụng:</b> $releaseTitle
+🏷️ <b>Phiên bản:</b> <b>v$Version</b> (Git Tag: <code>$tag</code>)
+🤖 <b>Nền tảng:</b> Android
+📦 <b>Tệp đính kèm:</b> $(($artifacts | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')
+📝 <b>Ghi chú:</b> $Notes
+
+📲 <b>Cài đặt:</b>
+1. <b>Quét mã QR trên</b> để tải trực tiếp file APK về máy.
+2. Hoặc tải trực tiếp: <a href='$primaryDownloadUrl'>👉 Tải file APK tại đây</a>
+🌐 <b>Bản phát hành GitHub:</b> <a href='$ghUrl'>Xem chi tiết trên GitHub</a>
 "@
-    Send-TgStep -Title "TỔNG KẾT PHÁT HÀNH ANDROID THÀNH CÔNG" -Message $summary -Status "HOÀN TẤT TOÀN DIỆN 🎯" -QrCodeData $primaryDownloadUrl
+    Send-TgStep -Title "PHÁT HÀNH ANDROID THÀNH CÔNG" -Message $summary -Status "HOÀN TẤT" -QrCodeData $primaryDownloadUrl -PhotoPath $qrDestPath
 } else {
-    Write-Host "gh CLI not detected. Git tag $tag pushed. APKs saved in release/ directory." -ForegroundColor Yellow
+    Write-Host "gh CLI không khả dụng. Đã push tag $tag lên remote." -ForegroundColor Yellow
 }
 
 # Nếu yêu cầu All (cả Android và iOS): Chạy tiếp iOS
@@ -256,4 +309,4 @@ if ($Platform -eq "all") {
     & $iosScript -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
 }
 
-Write-Host "Release $tag completed successfully!" -ForegroundColor Green
+Write-Host "Phát hành $tag hoàn tất thành công!" -ForegroundColor Green

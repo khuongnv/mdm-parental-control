@@ -42,32 +42,7 @@ class MidnightResetReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // 1. Phục hồi chính sách về hạn mức chuẩn (Mặc định 120 phút / 2 giờ)
-                val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
-                val resetPolicy = currentPolicy.copy(
-                    dailyLimitMinutes = 120, // Reset về 2 giờ mặc định
-                    isEmergencyLockdown = false
-                )
-                usageDao.savePolicy(resetPolicy)
-                Log.i(TAG, "Daily quota successfully reset to 120 minutes.")
-
-                // 2. Mở khóa (Un-suspend) toàn bộ ứng dụng cho ngày mới
-                val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
-                val admin = ComponentName(context, MdmDeviceAdminReceiver::class.java)
-
-                if (dpm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isDeviceOwnerApp(context.packageName)) {
-                    val toUnsuspend = context.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-                        .map { it.packageName }
-                        .toTypedArray()
-                    try {
-                        dpm.setPackagesSuspended(admin, toUnsuspend, false)
-                        Log.i(TAG, "Midnight routine: Successfully unsuspended ${toUnsuspend.size} packages.")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to unsuspend packages at midnight", e)
-                    }
-                }
-
-                // 3. Lập lịch cho nửa đêm tiếp theo
+                performDailyReset(context, usageDao, devicePreferences)
                 scheduleNextMidnightAlarm(context)
             } catch (e: Exception) {
                 Log.e(TAG, "Error executing midnight reset routine", e)
@@ -80,6 +55,43 @@ class MidnightResetReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "MidnightResetReceiver"
         private const val REQUEST_CODE = 9001
+
+        /**
+         * Thực hiện nghiệp vụ hoàn trả hạn mức chuẩn và mở khóa ứng dụng khi bắt đầu ngày mới
+         */
+        suspend fun performDailyReset(
+            context: Context,
+            usageDao: UsageDao,
+            devicePreferences: DevicePreferences
+        ) {
+            val baseLimit = devicePreferences.baseDailyLimitMinutes.takeIf { it > 0 } ?: 120
+            Log.i(TAG, "🌅 Performing daily reset routine: Restoring base daily quota ($baseLimit mins) and unsuspending apps.")
+
+            // 1. Phục hồi chính sách về hạn mức chuẩn của phụ huynh cấu hình
+            val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
+            val resetPolicy = currentPolicy.copy(
+                dailyLimitMinutes = baseLimit,
+                isEmergencyLockdown = false
+            )
+            usageDao.savePolicy(resetPolicy)
+            Log.i(TAG, "Daily quota successfully restored to $baseLimit minutes.")
+
+            // 2. Mở khóa (Un-suspend) toàn bộ ứng dụng cho ngày mới
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager
+            val admin = ComponentName(context, MdmDeviceAdminReceiver::class.java)
+
+            if (dpm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && dpm.isDeviceOwnerApp(context.packageName)) {
+                val toUnsuspend = context.packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                    .map { it.packageName }
+                    .toTypedArray()
+                try {
+                    dpm.setPackagesSuspended(admin, toUnsuspend, false)
+                    Log.i(TAG, "Daily reset routine: Successfully unsuspended ${toUnsuspend.size} packages.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to unsuspend packages during daily reset", e)
+                }
+            }
+        }
 
         /**
          * Lập lịch Alarm chính xác đánh thức máy con vào đúng 00:00:00 đêm tiếp theo

@@ -163,11 +163,11 @@ object ChildNotificationHelper {
 
         val isBonus = deltaMinutes >= 0
         val title = if (isBonus) "🎁 Ba Mẹ Đã Thưởng Giờ Chơi!" else "⚠️ Ba Mẹ Đã Trừ Giờ Chơi!"
-        val reasonStr = if (!reason.isNullOrBlank()) " Lý do: $reason" else ""
+        val cleanReason = if (!reason.isNullOrBlank() && reason != "Thưởng giờ chơi" && reason != "Phạt trừ giờ chơi" && reason != "Thưởng giờ" && reason != "Phạt trừ giờ") " (Lý do: $reason)" else ""
         val body = if (isBonus) {
-            "Con được cộng thêm +$deltaMinutes phút sử dụng.$reasonStr"
+            "Con được cộng thêm +$deltaMinutes phút sử dụng hôm nay.$cleanReason"
         } else {
-            "Hạn mức hôm nay bị trừ ${-deltaMinutes} phút.$reasonStr"
+            "Hạn mức sử dụng hôm nay bị trừ ${-deltaMinutes} phút.$cleanReason"
         }
 
         val intent = Intent(context, MainActivity::class.java).apply {

@@ -9,6 +9,7 @@ import 'services/github_release_updater.dart';
 import 'services/system_notification_service.dart';
 import 'widgets/apple_notification.dart';
 import 'widgets/qr_pairing_sheet.dart';
+import 'widgets/family_management_sheet.dart';
 import 'utils/system_font_manager.dart';
 import 'utils/theme_manager.dart';
 
@@ -532,10 +533,22 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
   }
 
   void _selectDevice(Map<String, dynamic> dev) {
+    int rawExtra = (dev['extra_time_minutes'] as num?)?.toInt() ?? 0;
+    final updatedAtStr = dev['updated_at'] as String?;
+    if (updatedAtStr != null && rawExtra > 0) {
+      try {
+        final updatedDate = DateTime.parse(updatedAtStr).toLocal();
+        final now = DateTime.now();
+        if (updatedDate.year != now.year || updatedDate.month != now.month || updatedDate.day != now.day) {
+          rawExtra = 0;
+        }
+      } catch (_) {}
+    }
+
     setState(() {
       activeDevice = dev;
       isEmergencyLocked = dev['is_locked'] == true;
-      extraTimeMinutes = (dev['extra_time_minutes'] as num?)?.toInt() ?? 0;
+      extraTimeMinutes = rawExtra;
       currentAppName = dev['current_app_name'] as String?;
       batteryLevel = (dev['battery_level'] as num?)?.toInt();
       isCharging = dev['is_charging'] == true;
@@ -792,7 +805,18 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
             isEmergencyLocked = devData['is_locked'] == true;
           }
           if (devData['extra_time_minutes'] != null) {
-            extraTimeMinutes = (devData['extra_time_minutes'] as num).toInt();
+            int extra = (devData['extra_time_minutes'] as num).toInt();
+            final updStr = devData['updated_at'] as String?;
+            if (updStr != null && extra > 0) {
+              try {
+                final updDate = DateTime.parse(updStr).toLocal();
+                final now = DateTime.now();
+                if (updDate.year != now.year || updDate.month != now.month || updDate.day != now.day) {
+                  extra = 0;
+                }
+              } catch (_) {}
+            }
+            extraTimeMinutes = extra;
           }
           final idx = familyDevices.indexWhere((d) => d['id'] == deviceId);
           if (idx != -1) {
@@ -1814,6 +1838,24 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
     );
   }
 
+  void _openFamilyManagement() async {
+    final familyId = await _supabaseService.getOrCreateFamily();
+    if (!mounted) return;
+    FamilyManagementSheet.show(
+      context: context,
+      activeFamilyId: familyId,
+      onFamilySwitched: (newFamId) async {
+        await _loadDeviceData();
+      },
+      onFamilyUpdated: () async {
+        await _loadDeviceData();
+      },
+      onOpenPairingScanner: () {
+        _showPairingDialog();
+      },
+    );
+  }
+
   Widget _buildHeader() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1828,6 +1870,8 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
             ),
             Row(
               children: [
+                _buildCircleButton(Icons.family_restroom_rounded, _openFamilyManagement),
+                const SizedBox(width: 8),
                 _buildCircleButton(Icons.refresh_rounded, _loadDeviceData),
                 const SizedBox(width: 8),
                 _buildCircleButton(Icons.qr_code_scanner_rounded, _showPairingDialog, isAccent: true),
@@ -2999,6 +3043,16 @@ class SettingsTab extends StatefulWidget {
 class _SettingsTabState extends State<SettingsTab> {
   final ParentAppUpdater _updater = ParentAppUpdater();
 
+  void _openFamilyManagement() async {
+    final supabase = MdmSupabaseService();
+    final familyId = await supabase.getOrCreateFamily();
+    if (!mounted) return;
+    FamilyManagementSheet.show(
+      context: context,
+      activeFamilyId: familyId,
+    );
+  }
+
   Future<void> _showCreateInviteDialog() async {
     final supabaseService = MdmSupabaseService();
     try {
@@ -3467,6 +3521,15 @@ class _SettingsTabState extends State<SettingsTab> {
               ),
               child: Column(
                 children: [
+                  _buildSettingsRow(
+                    icon: Icons.family_restroom_rounded,
+                    iconColor: AppleTheme.applePurple,
+                    title: 'Quản lý gia đình & thành viên',
+                    subtitle: 'Danh sách phụ huynh, mã mời, thiết bị con',
+                    onTap: _openFamilyManagement,
+                    trailingWidget: const Icon(Icons.arrow_forward_ios_rounded, color: AppleTheme.textSecondary, size: 14),
+                  ),
+                  Divider(color: context.hairlineDividerColor, height: 1, indent: 62),
                   _buildSettingsRow(
                     icon: Icons.person_add_alt_1_rounded,
                     iconColor: AppleTheme.applePurple,

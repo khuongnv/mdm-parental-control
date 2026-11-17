@@ -27,6 +27,7 @@ import com.mdm.parentalcontrol.child.data.local.DevicePreferences
 import com.mdm.parentalcontrol.child.data.local.UsageDao
 import com.mdm.parentalcontrol.child.network.MdmSupabaseClient
 import com.mdm.parentalcontrol.child.receiver.MdmDeviceAdminReceiver
+import com.mdm.parentalcontrol.child.receiver.MidnightResetReceiver
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
@@ -50,6 +51,7 @@ class UsageTrackingForegroundService : LifecycleService() {
     private var lastEventQueryTime = System.currentTimeMillis()
     private var lastTelemetryReportTime = 0L
     private var hasShown5MinWarningToday = false
+    private var currentTrackingDay: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     private var currentActivePackage = "Màn hình chính"
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var telemetryJob: kotlinx.coroutines.Job? = null
@@ -172,17 +174,19 @@ class UsageTrackingForegroundService : LifecycleService() {
                     Log.i(TAG, "⚡ Foreground Service handling ADJUST_SCREEN_TIME: delta=$deltaMinutes, reason=$reason")
                     ChildNotificationHelper.showTimeAdjustedNotification(this@UsageTrackingForegroundService, deltaMinutes, reason)
                     lifecycleScope.launch(Dispatchers.Main) {
+                        val cleanReason = if (!reason.isNullOrBlank() && reason != "Thưởng giờ chơi" && reason != "Phạt trừ giờ chơi" && reason != "Thưởng giờ" && reason != "Phạt trừ giờ") " ($reason)" else ""
                         val msg = if (deltaMinutes >= 0) {
-                            "🎁 Ba mẹ đã thưởng thêm $deltaMinutes phút sử dụng!"
+                            "🎁 Ba mẹ đã thưởng thêm $deltaMinutes phút sử dụng!$cleanReason"
                         } else {
-                            "⚠️ Ba mẹ đã trừ ${-deltaMinutes} phút giờ chơi! ${reason ?: ""}"
+                            "⚠️ Ba mẹ đã trừ ${-deltaMinutes} phút giờ chơi!$cleanReason"
                         }
                         Toast.makeText(this@UsageTrackingForegroundService, msg, Toast.LENGTH_LONG).show()
                     }
                     lifecycleScope.launch(Dispatchers.IO) {
+                        hasShown5MinWarningToday = false
                         val currentPolicy = usageDao.getLocalPolicy() ?: DevicePolicyLocalEntity()
                         val newLimit = (currentPolicy.dailyLimitMinutes + deltaMinutes).coerceAtLeast(0)
-                        usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = newLimit))
+                        usageDao.savePolicy(currentPolicy.copy(dailyLimitMinutes = newLimit, isEmergencyLockdown = false))
 
                         // Nếu phạt trừ giờ khiến đã vượt quota, lập tức khóa ngay
                         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -284,6 +288,7 @@ class UsageTrackingForegroundService : LifecycleService() {
             val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             while (isActive && isScreenOn) {
                 try {
+                    checkDateChangeAndPerformDailyResetIfNeeded()
                     val now = System.currentTimeMillis()
                     usageStatsManager?.let { queryAndAggregateUsage(it, lastEventQueryTime, now) }
                     lastEventQueryTime = now
@@ -294,6 +299,22 @@ class UsageTrackingForegroundService : LifecycleService() {
                 }
                 delay(3000L) // 3s interval (Screen Aware)
             }
+        }
+    }
+
+    /**
+     * Tự động phát hiện khi qua nửa đêm (00:00:00) hoặc sang ngày mới ngay trong runtime,
+     * tự động hoàn trả hạn mức chuẩn, xóa cảnh báo và mở khóa ứng dụng cục bộ.
+     */
+    private suspend fun checkDateChangeAndPerformDailyResetIfNeeded() {
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        if (today != currentTrackingDay) {
+            Log.i(TAG, "📅 Date change detected in service loop! (Old: $currentTrackingDay, New: $today). Executing daily reset.")
+            currentTrackingDay = today
+            hasShown5MinWarningToday = false
+            MidnightResetReceiver.performDailyReset(this, usageDao, devicePreferences)
+            MidnightResetReceiver.scheduleNextMidnightAlarm(this)
+            checkAndReportTelemetry(force = true)
         }
     }
 

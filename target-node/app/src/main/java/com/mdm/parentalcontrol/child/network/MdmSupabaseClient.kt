@@ -442,8 +442,11 @@ class MdmSupabaseClient @Inject constructor() {
                                 val minutes = innerPayload?.optInt("extra_minutes", 15) ?: 15
                                 Log.i(TAG, "⏳ Supabase Realtime received GRANT_EXTRA_TIME: +$minutes minutes")
                                 callbackList.forEach {
-                                    it.onExtraTime?.invoke(minutes)
-                                    it.onAdjustTime?.invoke(minutes, "Thưởng giờ chơi")
+                                    if (it.onAdjustTime != null) {
+                                        it.onAdjustTime.invoke(minutes, "Thưởng giờ chơi")
+                                    } else {
+                                        it.onExtraTime?.invoke(minutes)
+                                    }
                                 }
                             }
                             "ADJUST_SCREEN_TIME" -> {
@@ -452,7 +455,6 @@ class MdmSupabaseClient @Inject constructor() {
                                 Log.i(TAG, "⚡ Supabase Realtime received ADJUST_SCREEN_TIME: delta=$delta, reason=$reason")
                                 callbackList.forEach {
                                     it.onAdjustTime?.invoke(delta, reason)
-                                    if (delta > 0) it.onExtraTime?.invoke(delta)
                                 }
                             }
                             "REMOTE_MESSAGE" -> {

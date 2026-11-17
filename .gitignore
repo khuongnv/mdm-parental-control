@@ -63,11 +63,36 @@ yarn-error.log*
 .pub/
 */flutter_export_environment.sh
 
-# Logs & Environment Secrets
+# Logs & Release Artifacts
 *.log
-.env
-.env.local
-.env.production
-*.p12
-*.mobileprovision
 release/
+
+# Security, Certificates & Signing Keys
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem
+*.cer
+*.crt
+*.der
+*.mobileprovision
+docs/dev/
+secrets/
+*.secret
+*.secrets
+secrets.json
+
+# Apple & iOS Distribution Artifacts
+*.ipa
+*.xcarchive
+*.dSYM.zip
+*.dSYM/
+
+# Environment Configurations & Secret Files
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+deploy.env

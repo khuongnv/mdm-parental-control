@@ -9,7 +9,7 @@
 
 ## 1. Phân Tích & Kế Hoạch (Analysis & Planning)
 - **Nghiên cứu từ `hni-hub`**:
-  - Máy chủ build macOS: Mac M1 Pro tại `100.111.29.5` (SSH port 22, user `khuongnv`, xác thực bằng khóa SSH `~/.ssh/id_ed25519`).
+  - Máy chủ build macOS: Mac M1 Pro (quản lý qua `MAC_BUILD_HOST`, SSH port 22, user qua `MAC_BUILD_USER`, xác thực bằng khóa SSH `~/.ssh/id_ed25519`).
   - Chứng chỉ số Enterprise In-House: `VNPT_Enterprise_iOS Distribution_18082029.p12` (Team ID `JPMH34L85K`).
   - Mobileprovision: `Prov_HNI_comdhtthniquanlytaptrung.mobileprovision` (UUID: `f5a84849-5dda-4021-adcb-877132002773`, Name: `Prov_HNI_com.dhtthni.quanlytaptrung`).
   - Bundle Identifier: `com.dhtthni.quanlytaptrung` (khớp với `GoogleService-Info.plist` và Firebase).
@@ -23,15 +23,15 @@
   - iOS không cho phép Safari cài trực tiếp file `.ipa`. Cần file `manifest.plist` trỏ đến link tải IPA trên GitHub Releases.
   - Link OTA cài đặt: `itms-services://?action=download-manifest&url=https://github.com/khuongnv/mdm-parental-control/releases/download/admin-ios-vX.Y.Z/manifest.plist`.
 - **Kênh thông báo Telegram HUB-LOG**:
-  - Bot: `HniBOT` (`8005142785:AAHSrJ2Yp4l0Gj6Yk7iu8hwSwThZIiVKrCU`).
-  - Channel: `HUB-LOG` (`-1003609918702`).
+  - Bot: `HniBOT` (quản lý qua `TELEGRAM_BOT_TOKEN`).
+  - Channel: `HUB-LOG` (quản lý qua `TELEGRAM_CHANNEL_ID`).
   - Thông báo tiến trình 6 bước từ khởi động đến tổng kết link cài đặt.
 
 ---
 
 ## 2. Chi Tiết Các Bước Thực Hiện (Execution Steps)
-- **Bước 1**: Khảo sát `docs/dev` và giải mã file mobileprovision để lấy chính xác UUID, Team ID và Bundle ID.
-- **Bước 2**: Kiểm tra kết nối SSH tới Mac M1 Pro `100.111.29.5`: Xác nhận khóa SSH `id_ed25519` hoạt động hoàn hảo, Keychain đã có sẵn Identity `55EC3964ACBC2DCA8D9C621C07EFA94AF764600F`.
+- **Bước 1**: Khảo sát thư mục chứng chỉ và giải mã file mobileprovision để lấy chính xác UUID, Team ID và Bundle ID.
+- **Bước 2**: Kiểm tra kết nối SSH tới máy Mac M1 Pro: Xác nhận khóa SSH hoạt động hoàn hảo, Keychain đã có sẵn Identity ký số.
 - **Bước 3**: Tạo cấu hình ký số Enterprise cho iOS:
   - Tạo `admin-node/ios/ExportOptions-enterprise.plist`.
   - Cập nhật `admin-node/ios/Flutter/Release.xcconfig` với Bundle ID `com.dhtthni.quanlytaptrung` và Manual Enterprise Signing.
@@ -66,7 +66,7 @@
 ---
 
 ## 4. Kiểm Thử & Đánh Giá Bảo Mật (Verification & Security Audit)
-- Kiểm tra kết nối SSH không cần mật khẩu tới `100.111.29.5`: Thành công.
+- Kiểm tra kết nối SSH không cần mật khẩu tới máy chủ build macOS: Thành công.
 - Kiểm tra tính hợp lệ của chứng chỉ và profile ký số: Đạt chuẩn Enterprise In-House (Team `JPMH34L85K`, hạn đến 2027/2029).
 - Kiểm tra API GitHub Releases: Cơ chế lọc bằng prefix loại trừ 100% rủi ro cập nhật nhầm chéo nền tảng.
 - Bảo mật thông tin: Không có private key hay token nhạy cảm nào bị đưa vào Git repo ngoài các tài liệu dev đã có.

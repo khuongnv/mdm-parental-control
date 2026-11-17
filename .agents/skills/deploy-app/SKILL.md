@@ -9,7 +9,7 @@ user-invocable: true
 Kỹ năng này hướng dẫn và cung cấp công cụ tự động hóa toàn diện 100% để **Swarm Agent** và kỹ sư phát hành phiên bản mới độc lập cho các ứng dụng trong hệ thống MDM Parental Control:
 1. `target-node`: Ứng dụng máy con nắm quyền **Android Device Owner (DO)**. Tự động tải về và nâng cấp ngầm (**Silent Install**) qua GitHub Releases.
 2. `admin-node` (Android): Ứng dụng di động **Parent Admin (Flutter Android APK)**. Thông báo trong app và tải APK cài đè.
-3. `admin-node` (iOS): Ứng dụng di động **Parent Admin (Flutter iOS Enterprise IPA)**. Tự động build từ xa qua Mac M1 Pro (`100.111.29.5`), ký chứng chỉ In-House Enterprise VNPT, xuất file `.ipa` + Apple OTA Manifest (`manifest.plist`), cài đặt trực tiếp qua giao thức `itms-services://`.
+3. `admin-node` (iOS): Ứng dụng di động **Parent Admin (Flutter iOS Enterprise IPA)**. Tự động build từ xa qua máy Mac M1 Pro, ký chứng chỉ In-House Enterprise VNPT, xuất file `.ipa` + Apple OTA Manifest (`manifest.plist`), cài đặt trực tiếp qua giao thức `itms-services://`.
 4. **Giám sát thời gian thực qua Telegram**: Tự động thông báo từng bước thực hiện và tổng kết kết quả lên kênh **HUB-LOG** qua bot **HniBOT**.
 
 ---
@@ -29,28 +29,27 @@ Kỹ năng này hướng dẫn và cung cấp công cụ tự động hóa toàn
 
 ---
 
-## 📲 2. Kiến Trúc Build & Ký Số iOS Enterprise Từ Xa (Remote Mac M1 Pro)
+## 📲 2. Kiến Trúc Build & Ký Số iOS Enterprise Từ Xa (Remote Mac)
 
 Đối với `admin-node` iOS:
-- **Máy Build**: Mac M1 Pro (`100.111.29.5`, SSH port 22, user `khuongnv`, pass `1230`).
-- **Chứng chỉ Enterprise**: `VNPT_Enterprise_iOS Distribution_18082029.p12` (Team ID: `JPMH34L85K`).
-- **Provisioning Profile**: `docs/dev/Prov_HNI_comdhtthniquanlytaptrung.mobileprovision` (UUID: `f5a84849-5dda-4021-adcb-877132002773`, Name: `Prov_HNI_com.dhtthni.quanlytaptrung`).
-- **Bundle ID**: `com.dhtthni.quanlytaptrung` (đã khai báo đồng bộ trong `docs/dev/GoogleService-Info.plist` và `Runner.xcodeproj`).
+- **Máy Build**: Mac M1 Pro (Cấu hình qua biến môi trường `MAC_BUILD_HOST`, `MAC_BUILD_USER`, `MAC_KEYCHAIN_PASSWORD` hoặc file `.env`).
+- **Chứng chỉ Enterprise**: `VNPT_Enterprise_iOS Distribution_18082029.p12` (Team ID: cấu hình qua `IOS_TEAM_ID` hoặc `.env`).
+- **Provisioning Profile**: `docs/dev/Prov_HNI_comdhtthniquanlytaptrung.mobileprovision` (UUID cấu hình qua `IOS_PROFILE_UUID` hoặc `.env`).
+- **Bundle ID**: `com.dhtthni.quanlytaptrung` (đã khai báo đồng bộ trong `Runner.xcodeproj`).
 - **Quy tắc ký số**: Manual Signing trong `Release.xcconfig` và `ExportOptions-enterprise.plist`, đồng thời khóa toàn bộ Pods với `CODE_SIGNING_ALLOWED = "NO"`.
 
 ---
 
 ## 🛰️ 3. Kênh Giám Sát Telegram Telemetry (HUB-LOG & HniBOT)
 
-- **Bot**: `HniBOT` (`8005142785:AAHSrJ2Yp4l0Gj6Yk7iu8hwSwThZIiVKrCU`)
-- **Kênh tiếp nhận**: `HUB-LOG` (`-1003609918702`)
+- **Bot**: `HniBOT` (Cấu hình qua biến môi trường `TELEGRAM_BOT_TOKEN` hoặc file `.env`).
+- **Kênh tiếp nhận**: `HUB-LOG` (Cấu hình qua biến môi trường `TELEGRAM_CHANNEL_ID` hoặc file `.env`).
 - **Các mốc thông báo tự động**:
-  - `Bước 1`: Khởi động phát hành (Tên app, Nền tảng, Phiên bản, Git Tag)
-  - `Bước 2`: Kiểm tra Keychain & Nạp Chứng chỉ Enterprise / Profile trên Mac M1 Pro
-  - `Bước 3`: Đồng bộ Source Code & Cài đặt Pods (`flutter pub get`, `pod install`)
-  - `Bước 4`: Biên dịch Release IPA (`xcodebuild archive` & `xcodebuild -exportArchive`)
-  - `Bước 5`: Đóng gói Apple OTA Manifest (`manifest.plist`) & Đẩy lên GitHub Releases
-  - `Bước 6`: **TỔNG KẾT PHÁT HÀNH THÀNH CÔNG** (Link OTA trực tiếp cho iPhone, Link GitHub Release, mã băm SHA256)
+  - `Bước 1`: Khởi động phát hành (Tên app, Nền tảng, Phiên bản, Git Tag).
+  - `Bước 2`: Kiểm tra Keychain & Nạp Chứng chỉ Enterprise / Profile trên Mac M1 Pro.
+  - `Bước 3`: Đồng bộ Source Code & Cài đặt Pods (`flutter pub get`, `pod install`).
+  - `Bước 4`: Biên dịch Release IPA (`xcodebuild archive` & `xcodebuild -exportArchive`).
+  - `Bước 5 & 6`: **TỔNG KẾT PHÁT HÀNH THÀNH CÔNG KẾT HỢP MÃ QR CODE CÀI ĐẶT** (Tự động gộp thành 1 thẻ duy nhất gồm ảnh QR Code và toàn bộ thông tin phiên bản, link OTA cài trực tiếp cho iPhone/iPad hoặc tải APK cho Android, mã SHA256, link GitHub Release — hoàn toàn không chia tách gây loãng kênh chat).
 
 ---
 
@@ -118,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File .agents/skills/deploy-app/scripts/deplo
 - `.agents/skills/deploy-app/templates/manifest.plist.template`: Mẫu Apple OTA Manifest cho iOS Enterprise.
 - `admin-node/ios/ExportOptions-enterprise.plist`: File cấu hình Enterprise manual signing cho xcodebuild.
 - `admin-node/ios/Flutter/Release.xcconfig`: Cấu hình Signing & Bundle ID `com.dhtthni.quanlytaptrung`.
-- `docs/dev/`: Chứa file `.p12`, `.mobileprovision` và `GoogleService-Info.plist`.
+- `docs/dev/`: Thư mục lưu trữ chứng chỉ ký số cục bộ (`.p12`, `.mobileprovision` - đã được bảo vệ trong `.gitignore`, không đưa lên Git).
 
 ---
 

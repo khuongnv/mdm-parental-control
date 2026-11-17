@@ -6,9 +6,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.44.4";
 
 interface FcmPayload {
   device_id: string;
-  action: "PANIC_LOCKDOWN" | "GRANT_EXTRA_TIME" | "SYNC_POLICY" | "REMOTE_MESSAGE" | "TIME_REQUEST_RESOLVED";
+  action: "PANIC_LOCKDOWN" | "GRANT_EXTRA_TIME" | "ADJUST_SCREEN_TIME" | "SYNC_POLICY" | "REMOTE_MESSAGE" | "TIME_REQUEST_RESOLVED";
   is_locked?: boolean;
   extra_minutes?: number;
+  delta_minutes?: number;
+  reason?: string;
   title?: string;
   body?: string;
   message_id?: string;
@@ -169,6 +171,12 @@ serve(async (req) => {
     }
     if (extra_minutes !== undefined) {
       dataPayload.extra_minutes = extra_minutes.toString();
+    }
+    if (body.delta_minutes !== undefined) {
+      dataPayload.delta_minutes = body.delta_minutes.toString();
+    }
+    if (body.reason !== undefined) {
+      dataPayload.reason = body.reason;
     }
     if (body.title !== undefined) dataPayload.title = body.title;
     if (body.body !== undefined) dataPayload.body = body.body;
