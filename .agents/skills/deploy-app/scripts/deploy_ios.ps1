@@ -108,6 +108,21 @@ function Send-TgStep {
     }
 }
 
+function Invoke-MacScript {
+    param([string]$ScriptContent, [string]$StepName = "step")
+    $clean = $ScriptContent.Replace("`r`n", "`n").Replace("`r", "`n")
+    $tmpFile = [System.IO.Path]::GetTempFileName()
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tmpFile, $clean, $utf8NoBom)
+    
+    $remoteSh = "~/vfam-build/${StepName}.sh"
+    scp -o StrictHostKeyChecking=no "$tmpFile" "${macUser}@${macHost}:${remoteSh}"
+    Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+    
+    $output = ssh -o StrictHostKeyChecking=no "$macUser@$macHost" "zsh -l -c 'tr -d ""`r"" < ${remoteSh} > ~/vfam-build/run.sh && zsh -l ~/vfam-build/run.sh'"
+    return $output
+}
+
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "KHỞI ĐỘNG CI/CD BUILD & DEPLOY iOS CHO ADMIN-NODE" -ForegroundColor Cyan
 Write-Host "Tag: $tag | Version: $Version" -ForegroundColor Cyan
@@ -171,7 +186,7 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain
 security find-identity -v -p codesigning
 "@
 
-$keychainResult = ssh -o StrictHostKeyChecking=no "$macUser@$macHost" $keychainCmds
+$keychainResult = Invoke-MacScript -ScriptContent $keychainCmds -StepName "keychain"
 Write-Host $keychainResult
 
 Send-TgStep -Title $step2Title -Message "Đã xác thực chứng chỉ iPhone Distribution VNPT và nạp mobileprovision thành công." -Status "Thành công"
@@ -210,7 +225,7 @@ cd ios
 pod install
 "@
 
-$prepareResult = ssh -o StrictHostKeyChecking=no "$macUser@$macHost" $prepareCmds
+$prepareResult = Invoke-MacScript -ScriptContent $prepareCmds -StepName "prepare"
 Write-Host $prepareResult
 
 Send-TgStep -Title $step3Title -Message "Hoàn tất flutter pub get và pod install trên Xcode workspace." -Status "Thành công"
@@ -263,7 +278,7 @@ echo "=== SHA256 IPA ==="
 shasum -a 256 build/ios/ipa/*.ipa
 "@
 
-$buildResult = ssh -o StrictHostKeyChecking=no "$macUser@$macHost" $buildCmds
+$buildResult = Invoke-MacScript -ScriptContent $buildCmds -StepName "build"
 Write-Host $buildResult
 
 $shaMatch = [regex]::Match($buildResult, "([a-fA-F0-9]{64})\s+.*\.ipa")
