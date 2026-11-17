@@ -81,9 +81,15 @@
    - `BUILD SUCCESSFUL in 14s` ✅.
    - Toàn bộ tài nguyên mipmap mới được đóng gói chuẩn xác vào APK.
 
+4. **Triển Khai & Phát Hành Toàn Bộ Ứng Dụng (All Deployment v1.5.1)**:
+   - **Child DO Agent Android**: Tag `child-android-v1.5.1` -> File `vfam-child-android-1.5.1.apk` (21.95 MB) -> GitHub Release & Telegram QR code thành công ✅.
+   - **Parent Admin Android**: Tag `admin-android-v1.5.1` -> File `vfam-admin-android-1.5.1.apk` (31.7 MB) -> GitHub Release & Telegram QR code thành công ✅.
+   - **Parent Admin iOS Enterprise**: Tag `admin-ios-v1.5.1` -> Ký chữ ký số VNPT Enterprise, xuất IPA `mdm_admin_app.ipa` (11 MB, SHA256: `2a08f51686402cbabf4df3f429513a0c7d4f2ec84877b7d20d25cb44ea564309`) + `manifest.plist` -> Apple OTA Link `itms-services://` -> GitHub Release & Telegram QR code thành công ✅.
+
 ---
 
 ## 5. Kết Luận
 - Đã giải quyết triệt để 100% hai yêu cầu của người dùng:
   - Toàn bộ icon Child DO và Admin Phụ Huynh (Android, iOS, Web) đã được thay mới sắc nét, đúng phong cách nhận diện thương hiệu.
   - Vấn đề phiên bản app Admin hiển thị và so khớp đã được xử lý triệt để trên cả hai nền tảng (Android và iOS). Khi ở phiên bản mới nhất, app sẽ hiển thị thông báo "Ứng Dụng Đã Mới Nhất", không còn bị lặp thông báo cập nhật liên tục.
+- Phát hành thành công trọn bộ phiên bản **v1.5.1** trên GitHub Releases kèm giám sát Telegram HUB-LOG / HniBOT.
