@@ -6,7 +6,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.mdm.parentalcontrol.child.BuildConfig
@@ -218,20 +220,27 @@ class GitHubReleaseUpdater @Inject constructor(
             installApkSilentlyAsDeviceOwner(apkFile)
         } else {
             Log.i(TAG, "Installing APK via standard Intent")
-            try {
-                val contentUri: Uri = FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    apkFile
-                )
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(contentUri, "application/vnd.android.package-archive")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-                }
-                context.startActivity(intent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to launch standard APK installer", e)
+            installApkViaIntent(apkFile)
+        }
+    }
+
+    /**
+     * Cài đặt qua Intent tiêu chuẩn của hệ điều hành Android
+     */
+    fun installApkViaIntent(apkFile: File) {
+        try {
+            val contentUri: Uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                apkFile
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
             }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch standard APK installer", e)
         }
     }
 
@@ -241,11 +250,19 @@ class GitHubReleaseUpdater @Inject constructor(
     fun installApkSilentlyAsDeviceOwner(apkFile: File) {
         try {
             val packageInstaller = context.packageManager.packageInstaller
-            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+                setAppPackageName(context.packageName)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    setInstallReason(PackageManager.INSTALL_REASON_POLICY)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                }
+            }
             val sessionId = packageInstaller.createSession(params)
             val session = packageInstaller.openSession(sessionId)
 
-            val outStream = session.openWrite("package", 0, apkFile.length())
+            val outStream = session.openWrite("base.apk", 0, apkFile.length())
             val inStream = FileInputStream(apkFile)
 
             inStream.use { input ->
@@ -267,7 +284,8 @@ class GitHubReleaseUpdater @Inject constructor(
             session.close()
             Log.i(TAG, "Silent install session committed successfully via Device Owner PackageInstaller.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed silent install as DO", e)
+            Log.e(TAG, "Failed silent install as DO, falling back to standard intent", e)
+            installApkViaIntent(apkFile)
         }
     }
 
@@ -280,10 +298,26 @@ class SilentInstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-        if (status == PackageInstaller.STATUS_SUCCESS) {
-            Log.i("SilentInstallReceiver", "App updated successfully via GitHub Release silent install.")
-        } else {
-            Log.e("SilentInstallReceiver", "Silent install failed: $message (status: $status)")
+        when (status) {
+            PackageInstaller.STATUS_SUCCESS -> {
+                Log.i("SilentInstallReceiver", "App updated successfully via GitHub Release silent install.")
+            }
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                Log.i("SilentInstallReceiver", "User action required for install, launching confirmation intent.")
+                val confirmIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_INTENT)
+                }
+                confirmIntent?.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(this)
+                }
+            }
+            else -> {
+                Log.e("SilentInstallReceiver", "Silent install failed: $message (status: $status)")
+            }
         }
     }
 }
