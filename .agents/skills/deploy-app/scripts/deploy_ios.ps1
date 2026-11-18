@@ -55,18 +55,12 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     if (Test-Path $adminPubspecPath) {
         $content = Get-Content -Path $adminPubspecPath -Raw -Encoding UTF8
         if ($content -match "version:\s*([0-9\.]+)") {
-            $curVer = $matches[1]
-            $parts = $curVer.Split('.') | ForEach-Object { [int]$_ }
-            if ($parts.Count -ge 3) {
-                $Version = "$($parts[0]).$($parts[1] + 1).0"
-            } else {
-                $Version = "1.4.0"
-            }
+            $Version = $matches[1].Trim()
         } else {
-            $Version = "1.4.0"
+            $Version = "1.5.4"
         }
     } else {
-        $Version = "1.4.0"
+        $Version = "1.5.4"
     }
 }
 
@@ -134,11 +128,32 @@ $step1Desc = "Ứng dụng: VFam Parent (iOS Enterprise - <code>$bundleId</code>
 Write-Host ">>> $step1Title..." -ForegroundColor Yellow
 Send-TgStep -Title $step1Title -Message $step1Desc -Status "Đang khởi tạo cấu hình..."
 
+$adminBuildNumber = 13
 $adminPubspecPath = Join-Path $repoRoot "admin-node\pubspec.yaml"
 if (Test-Path $adminPubspecPath) {
     $pubContent = Get-Content -Path $adminPubspecPath -Raw -Encoding UTF8
-    $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+12"
+    if ($pubContent -match 'version:\s*([0-9\.]+)\+(\d+)') {
+        $oldPubVer = $matches[1]
+        $curBuildNum = [int]$matches[2]
+        $adminBuildNumber = if ($oldPubVer -ne $Version) { $curBuildNum + 1 } else { $curBuildNum }
+    }
+    $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+$adminBuildNumber"
     Set-Content -Path $adminPubspecPath -Value $pubContent -Encoding UTF8 -NoNewline
+}
+
+$adminUpdaterPath = Join-Path $repoRoot "admin-node\lib\services\github_release_updater.dart"
+if (Test-Path $adminUpdaterPath) {
+    $uContent = Get-Content -Path $adminUpdaterPath -Raw -Encoding UTF8
+    $uContent = $uContent -replace "defaultValue:\s*'[^']+'", "defaultValue: '$Version'"
+    Set-Content -Path $adminUpdaterPath -Value $uContent -Encoding UTF8 -NoNewline
+}
+
+$adminIosAppDelegate = Join-Path $repoRoot "admin-node\ios\Runner\AppDelegate.swift"
+if (Test-Path $adminIosAppDelegate) {
+    $sContent = Get-Content -Path $adminIosAppDelegate -Raw -Encoding UTF8
+    $sContent = $sContent -replace 'CFBundleShortVersionString"\] as\? String \?\? "[^"]+"', "CFBundleShortVersionString`"] as? String ?? `"$Version`""
+    $sContent = $sContent -replace 'CFBundleVersion"\] as\? String \?\? "[^"]+"', "CFBundleVersion`"] as? String ?? `"$adminBuildNumber`""
+    Set-Content -Path $adminIosAppDelegate -Value $sContent -Encoding UTF8 -NoNewline
 }
 
 $releaseDir = Join-Path $repoRoot "release"
@@ -154,11 +169,17 @@ $step2Desc = "Host: <code>$macHost</code> | Team ID: <code>$teamId</code> | Prof
 Write-Host ">>> $step2Title..." -ForegroundColor Yellow
 Send-TgStep -Title $step2Title -Message $step2Desc -Status "Đang kết nối SSH và cấu hình Keychain..."
 
-$p12Local = Join-Path $repoRoot "docs\dev\VNPT_Enterprise_iOS Distribution_18082029.p12"
-$provLocal = Join-Path $repoRoot "docs\dev\Prov_HNI_comdhtthniquanlytaptrung.mobileprovision"
+$p12Local = Join-Path $repoRoot ".env-data\VNPT_Enterprise_iOS Distribution_18082029.p12"
+if (-not (Test-Path $p12Local)) {
+    $p12Local = Join-Path $repoRoot "docs\dev\VNPT_Enterprise_iOS Distribution_18082029.p12"
+}
+$provLocal = Join-Path $repoRoot ".env-data\Prov_HNI_comdhtthniquanlytaptrung.mobileprovision"
+if (-not (Test-Path $provLocal)) {
+    $provLocal = Join-Path $repoRoot "docs\dev\Prov_HNI_comdhtthniquanlytaptrung.mobileprovision"
+}
 
 if (-not (Test-Path $p12Local) -or -not (Test-Path $provLocal)) {
-    $err = "Không tìm thấy file P12 hoặc Mobileprovision trong docs/dev/"
+    $err = "Không tìm thấy file P12 hoặc Mobileprovision trong .env-data/ hoặc docs/dev/"
     Send-TgStep -Title $step2Title -Message $err -Status "Lỗi ❌"
     throw $err
 }
@@ -236,7 +257,7 @@ $step4Desc = "Chạy flutter build ios --no-codesign -> xcodebuild archive -> ex
 Write-Host ">>> $step4Title..." -ForegroundColor Yellow
 Send-TgStep -Title $step4Title -Message $step4Desc -Status "Đang chạy xcodebuild archive trên Mac M1 Pro..."
 
-$flutterExtraArgs = ""
+$flutterExtraArgs = "--dart-define=APP_VERSION=$Version"
 if ($env:SUPABASE_URL) {
     $flutterExtraArgs += " --dart-define=SUPABASE_URL=$($env:SUPABASE_URL)"
 }
@@ -256,7 +277,7 @@ rm -rf build/ios/archive build/ios/ipa
 mkdir -p build/ios/archive build/ios/ipa
 
 echo "=== FLUTTER BUILD IOS NO-CODESIGN ==="
-flutter build ios --release --no-codesign --build-name="$Version" --build-number="11" $flutterExtraArgs
+flutter build ios --release --no-codesign --build-name="$Version" --build-number="$adminBuildNumber" $flutterExtraArgs
 
 echo "=== XCODEBUILD ARCHIVE ==="
 xcodebuild archive \
@@ -356,7 +377,8 @@ if ($ghExe) {
     $releaseFiles = @("$destIpa", "$manifestDestPath")
     if (Test-Path $qrDestPath) { $releaseFiles += "$qrDestPath" }
     
-    & "$ghExe" release create $tag ($releaseFiles) --title "$releaseTitle" --notes "$Notes" --verify-tag
+    & "$ghExe" release delete $tag --yes 2>$null
+    & "$ghExe" release create $tag ($releaseFiles) --title "$releaseTitle" --notes "$Notes" --verify-tag --latest
     Write-Host "GitHub Release đã tạo thành công!" -ForegroundColor Green
 } else {
     Write-Warning "gh CLI không khả dụng. Đã push tag $tag lên remote."

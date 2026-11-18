@@ -74,7 +74,25 @@ class MainActivity : AppCompatActivity() {
     @Inject
     lateinit var usageDao: UsageDao
 
-    private val currentAppVersion: String get() = BuildConfig.VERSION_NAME
+    private val currentAppVersion: String
+        get() = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: BuildConfig.VERSION_NAME
+        } catch (e: Exception) {
+            BuildConfig.VERSION_NAME
+        }
+
+    private val currentAppVersionCode: Long
+        get() = try {
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            BuildConfig.VERSION_CODE.toLong()
+        }
     private var onNewIntentListener: ((Intent) -> Unit)? = null
 
     override fun onNewIntent(intent: Intent) {
@@ -1225,7 +1243,7 @@ class MainActivity : AppCompatActivity() {
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "Phiên bản $currentAppVersion (Build ${BuildConfig.VERSION_CODE}) • GitHub Release",
+                                            text = "Phiên bản $currentAppVersion (Build $currentAppVersionCode) • GitHub Release",
                                             style = MaterialTheme.typography.bodyMedium.copy(
                                                 fontSize = 13.sp
                                             ),

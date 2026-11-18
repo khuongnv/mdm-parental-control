@@ -68,18 +68,12 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     if (Test-Path $adminPubspecPath) {
         $content = Get-Content -Path $adminPubspecPath -Raw -Encoding UTF8
         if ($content -match "version:\s*([0-9\.]+)") {
-            $curVer = $matches[1]
-            $parts = $curVer.Split('.') | ForEach-Object { [int]$_ }
-            if ($parts.Count -ge 3) {
-                $Version = "$($parts[0]).$($parts[1] + 1).0"
-            } else {
-                $Version = "1.4.0"
-            }
+            $Version = $matches[1].Trim()
         } else {
-            $Version = "1.4.0"
+            $Version = "1.5.4"
         }
     } else {
-        $Version = "1.4.0"
+        $Version = "1.5.4"
     }
 }
 
@@ -115,26 +109,61 @@ if ($Platform -eq "ios") {
     exit $LASTEXITCODE
 }
 
-# Nếu yêu cầu phát hành toàn bộ (all): Tuần tự phát hành Child Android, Admin Android và Admin iOS
+# Nếu yêu cầu phát hành toàn bộ (all): Tuần tự phát hành Child Android, Admin Android, Admin iOS và Unified Release (Latest)
 if ($Target -eq "all") {
     Write-Host "==========================================================" -ForegroundColor Cyan
     Write-Host "KHỞI ĐỘNG PHÁT HÀNH TOÀN BỘ HỆ THỐNG (ALL)" -ForegroundColor Cyan
     Write-Host "Version: $Version" -ForegroundColor Cyan
     Write-Host "==========================================================" -ForegroundColor Cyan
 
-    Write-Host ">>> 1/3: PHÁT HÀNH CHILD DO AGENT (ANDROID)..." -ForegroundColor Yellow
+    Write-Host ">>> 1/4: PHÁT HÀNH CHILD DO AGENT (ANDROID)..." -ForegroundColor Yellow
     & $PSCommandPath -Target child -Platform android -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
     if ($LASTEXITCODE -ne 0) { throw "Phát hành Child Android thất bại với exit code $LASTEXITCODE" }
 
-    Write-Host ">>> 2/3: PHÁT HÀNH PARENT ADMIN (ANDROID)..." -ForegroundColor Yellow
+    Write-Host ">>> 2/4: PHÁT HÀNH PARENT ADMIN (ANDROID)..." -ForegroundColor Yellow
     & $PSCommandPath -Target admin -Platform android -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
     if ($LASTEXITCODE -ne 0) { throw "Phát hành Admin Android thất bại với exit code $LASTEXITCODE" }
 
     if ($Platform -eq "all" -or $Platform -eq "ios") {
-        Write-Host ">>> 3/3: PHÁT HÀNH PARENT ADMIN (IOS ENTERPRISE)..." -ForegroundColor Yellow
+        Write-Host ">>> 3/4: PHÁT HÀNH PARENT ADMIN (IOS ENTERPRISE)..." -ForegroundColor Yellow
         $iosScript = Join-Path $PSScriptRoot "deploy_ios.ps1"
         & $iosScript -Version $Version -Notes $Notes -ChannelId $ChannelId -BotToken $BotToken
         if ($LASTEXITCODE -ne 0) { throw "Phát hành Admin iOS thất bại với exit code $LASTEXITCODE" }
+    }
+
+    Write-Host ">>> 4/4: PHÁT HÀNH UNIFIED GITHUB RELEASE v$Version (--latest)..." -ForegroundColor Yellow
+    $unifiedTag = "v$Version"
+    $unifiedTitle = "VFam MDM Parental Control Suite v$Version (Android Child DO, Admin Android & iOS Enterprise)"
+    git tag -a $unifiedTag -m "$unifiedTitle" -f
+    git push origin $unifiedTag -f
+
+    if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
+        try {
+            $credOut = ("protocol=https`nhost=github.com`n`n" | git credential fill | Out-String)
+            if ($credOut -match "password=(.+)") {
+                $env:GH_TOKEN = $matches[1].Trim()
+            }
+        } catch {}
+    }
+
+    $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+    if ($ghExe) {
+        $releaseDir = Join-Path $repoRoot "release"
+        $unifiedAssets = @()
+        $candidates = @(
+            "vfam-child-android-$Version.apk",
+            "vfam-admin-android-$Version.apk",
+            "vfam-admin-ios-$Version.ipa",
+            "manifest.plist"
+        )
+        foreach ($c in $candidates) {
+            $p = Join-Path $releaseDir $c
+            if (Test-Path $p) { $unifiedAssets += "`"$p`"" }
+        }
+        & "$ghExe" release delete $unifiedTag --yes 2>$null
+        $uCmd = "& `"$ghExe`" release create $unifiedTag $($unifiedAssets -join ' ') --title `"$unifiedTitle`" --notes `"$Notes`" --verify-tag --latest"
+        Invoke-Expression $uCmd
+        Write-Host "Unified GitHub Release $unifiedTag (--latest) đã tạo thành công!" -ForegroundColor Green
     }
 
     Write-Host "==========================================================" -ForegroundColor Green
@@ -180,6 +209,12 @@ if ($normTarget -eq "child" -or $normTarget -eq "all") {
     $targetGradlePath = Join-Path $repoRoot "target-node\app\build.gradle.kts"
     if (Test-Path $targetGradlePath) {
         $gradleContent = Get-Content -Path $targetGradlePath -Raw -Encoding UTF8
+        $oldVerName = if ($gradleContent -match 'versionName\s*=\s*"([^"]+)"') { $matches[1] } else { "" }
+        if ($gradleContent -match 'versionCode\s*=\s*(\d+)') {
+            $curCode = [int]$matches[1]
+            $newCode = if ($oldVerName -ne $Version) { $curCode + 1 } else { $curCode }
+            $gradleContent = $gradleContent -replace 'versionCode\s*=\s*\d+', "versionCode = $newCode"
+        }
         $gradleContent = $gradleContent -replace 'versionName\s*=\s*"[^"]+"', "versionName = `"$Version`""
         Set-Content -Path $targetGradlePath -Value $gradleContent -Encoding UTF8 -NoNewline
     }
@@ -214,19 +249,45 @@ if ($normTarget -eq "admin" -or $normTarget -eq "all") {
         -Status "Đang biên dịch..."
 
     Write-Host "Đồng bộ version Admin Node lên $Version..." -ForegroundColor Cyan
+    $adminBuildNumber = 13
     $adminPubspecPath = Join-Path $repoRoot "admin-node\pubspec.yaml"
     if (Test-Path $adminPubspecPath) {
         $pubContent = Get-Content -Path $adminPubspecPath -Raw -Encoding UTF8
-        $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+12"
+        if ($pubContent -match 'version:\s*([0-9\.]+)\+(\d+)') {
+            $oldPubVer = $matches[1]
+            $curBuildNum = [int]$matches[2]
+            $adminBuildNumber = if ($oldPubVer -ne $Version) { $curBuildNum + 1 } else { $curBuildNum }
+        }
+        $pubContent = $pubContent -replace 'version:\s*[0-9\.\+\-]+', "version: $Version+$adminBuildNumber"
         Set-Content -Path $adminPubspecPath -Value $pubContent -Encoding UTF8 -NoNewline
     }
 
-    Write-Host "Biên dịch Admin Node (VFam Admin Android)..." -ForegroundColor Yellow
+    $adminUpdaterPath = Join-Path $repoRoot "admin-node\lib\services\github_release_updater.dart"
+    if (Test-Path $adminUpdaterPath) {
+        $uContent = Get-Content -Path $adminUpdaterPath -Raw -Encoding UTF8
+        $uContent = $uContent -replace "defaultValue:\s*'[^']+'", "defaultValue: '$Version'"
+        Set-Content -Path $adminUpdaterPath -Value $uContent -Encoding UTF8 -NoNewline
+    }
+
+    $adminIosAppDelegate = Join-Path $repoRoot "admin-node\ios\Runner\AppDelegate.swift"
+    if (Test-Path $adminIosAppDelegate) {
+        $sContent = Get-Content -Path $adminIosAppDelegate -Raw -Encoding UTF8
+        $sContent = $sContent -replace 'CFBundleShortVersionString"\] as\? String \?\? "[^"]+"', "CFBundleShortVersionString`"] as? String ?? `"$Version`""
+        $sContent = $sContent -replace 'CFBundleVersion"\] as\? String \?\? "[^"]+"', "CFBundleVersion`"] as? String ?? `"$adminBuildNumber`""
+        Set-Content -Path $adminIosAppDelegate -Value $sContent -Encoding UTF8 -NoNewline
+    }
+
+    Write-Host "Biên dịch Admin Node (VFam Admin Android v$Version+$adminBuildNumber)..." -ForegroundColor Yellow
     Set-Location (Join-Path $repoRoot "admin-node")
     Remove-Item -Path (Join-Path $repoRoot "admin-node\build\app\outputs\flutter-apk\app-release.apk") -Force -ErrorAction SilentlyContinue
     Remove-Item -Path (Join-Path $repoRoot "admin-node\build\app\outputs\apk\release\app-release.apk") -Force -ErrorAction SilentlyContinue
 
-    $flutterArgs = @("build", "apk", "--release")
+    $flutterArgs = @(
+        "build", "apk", "--release",
+        "--build-name=$Version",
+        "--build-number=$adminBuildNumber",
+        "--dart-define=APP_VERSION=$Version"
+    )
     if ($env:SUPABASE_URL) {
         $flutterArgs += "--dart-define=SUPABASE_URL=$($env:SUPABASE_URL)"
     }
@@ -302,7 +363,8 @@ if ($ghExe) {
     } catch {}
 
     $artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
-    $cmd = "& `"$ghExe`" release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag"
+    & "$ghExe" release delete $tag --yes 2>$null
+    $cmd = "& `"$ghExe`" release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag --latest"
     Invoke-Expression $cmd
     Write-Host "GitHub Release đã tạo thành công!" -ForegroundColor Green
     

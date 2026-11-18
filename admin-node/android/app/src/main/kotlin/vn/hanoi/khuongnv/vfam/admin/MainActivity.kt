@@ -40,9 +40,23 @@ class MainActivity : FlutterActivity() {
                 "getAppVersion" -> {
                     try {
                         val pInfo = packageManager.getPackageInfo(packageName, 0)
-                        result.success(pInfo.versionName ?: "1.1.0")
+                        result.success(pInfo.versionName ?: "1.5.4")
                     } catch (e: Exception) {
-                        result.success("1.1.0")
+                        result.success("1.5.4")
+                    }
+                }
+                "getAppBuildNumber" -> {
+                    try {
+                        val pInfo = packageManager.getPackageInfo(packageName, 0)
+                        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            pInfo.longVersionCode.toString()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pInfo.versionCode.toString()
+                        }
+                        result.success(code)
+                    } catch (e: Exception) {
+                        result.success("13")
                     }
                 }
                 "installApk" -> {

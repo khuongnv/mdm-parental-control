@@ -3280,7 +3280,11 @@ class _SettingsTabState extends State<SettingsTab> {
 
   Future<void> _checkUpdate() async {
     setState(() => isCheckingUpdate = true);
-    final releaseInfo = await _updater.checkForUpdate(currentVersion);
+    final freshVer = await _updater.getCurrentAppVersion();
+    if (mounted) {
+      setState(() => currentVersion = freshVer);
+    }
+    final releaseInfo = await _updater.checkForUpdate(freshVer);
 
     if (!mounted) return;
     setState(() => isCheckingUpdate = false);

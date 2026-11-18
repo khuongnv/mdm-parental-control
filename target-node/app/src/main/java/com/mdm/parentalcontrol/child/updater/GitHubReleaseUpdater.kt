@@ -68,13 +68,22 @@ class GitHubReleaseUpdater @Inject constructor(
         }
     }
 
+    fun getInstalledVersionName(): String {
+        return try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                ?: BuildConfig.VERSION_NAME
+        } catch (e: Exception) {
+            BuildConfig.VERSION_NAME
+        }
+    }
+
     /**
      * Kiểm tra phiên bản mới nhất từ GitHub Releases API
      */
     suspend fun checkLatestRelease(
         repoOwner: String = "khuongnv",
         repoName: String = "mdm-parental-control",
-        currentVersion: String = BuildConfig.VERSION_NAME
+        currentVersion: String = getInstalledVersionName()
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         val apiUrl = "https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=15"
         var conn: HttpURLConnection? = null

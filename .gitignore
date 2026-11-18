@@ -91,6 +91,7 @@ secrets.json
 
 # Environment Configurations & Secret Files
 .env
+.env-data/
 .env.*
 !.env.example
 *.env
