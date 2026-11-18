@@ -166,7 +166,13 @@ if ($ghExe -and -not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
             $p = Join-Path $releaseDir $c
             if (Test-Path $p) { $unifiedAssets += "`"$p`"" }
         }
-        & "$ghExe" release delete $unifiedTag --yes 2>$null
+        try {
+            $oldEAP = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            & "$ghExe" release delete $unifiedTag --yes *>$null
+        } catch {} finally {
+            $ErrorActionPreference = $oldEAP
+        }
         $uCmd = "& `"$ghExe`" release create $unifiedTag $($unifiedAssets -join ' ') --title `"$unifiedTitle`" --notes `"$Notes`" --verify-tag --latest"
         Invoke-Expression $uCmd
         Write-Host "Unified GitHub Release $unifiedTag (--latest) đã tạo thành công!" -ForegroundColor Green
@@ -382,7 +388,13 @@ if ($ghExe) {
     } catch {}
 
     $artifactArgs = $artifacts | ForEach-Object { "`"$_`"" }
-    & "$ghExe" release delete $tag --yes 2>$null
+    try {
+        $oldEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & "$ghExe" release delete $tag --yes *>$null
+    } catch {} finally {
+        $ErrorActionPreference = $oldEAP
+    }
     $cmd = "& `"$ghExe`" release create $tag $($artifactArgs -join ' ') --title `"$releaseTitle`" --notes `"$Notes`" --verify-tag --latest"
     Invoke-Expression $cmd
     Write-Host "GitHub Release đã tạo thành công!" -ForegroundColor Green

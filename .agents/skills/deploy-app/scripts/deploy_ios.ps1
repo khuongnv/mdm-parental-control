@@ -383,7 +383,13 @@ if ($ghExe) {
     $releaseFiles = @("$destIpa", "$manifestDestPath")
     if (Test-Path $qrDestPath) { $releaseFiles += "$qrDestPath" }
     
-    & "$ghExe" release delete $tag --yes 2>$null
+    try {
+        $oldEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & "$ghExe" release delete $tag --yes *>$null
+    } catch {} finally {
+        $ErrorActionPreference = $oldEAP
+    }
     & "$ghExe" release create $tag ($releaseFiles) --title "$releaseTitle" --notes "$Notes" --verify-tag --latest
     Write-Host "GitHub Release đã tạo thành công!" -ForegroundColor Green
 } else {
