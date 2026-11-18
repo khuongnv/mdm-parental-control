@@ -370,7 +370,13 @@ if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
     } catch {}
 }
 
-$ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+$ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "D:\Tools\gh\bin\gh.exe") { "D:\Tools\gh\bin\gh.exe" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+if ($ghExe -and -not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
+    try {
+        $tok = (& "$ghExe" auth token 2>$null | Out-String).Trim()
+        if ($tok) { $env:GH_TOKEN = $tok; $env:GITHUB_TOKEN = $tok }
+    } catch {}
+}
 
 if ($ghExe) {
     Write-Host "Tạo GitHub Release qua gh CLI..." -ForegroundColor Cyan

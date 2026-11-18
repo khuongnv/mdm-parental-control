@@ -146,7 +146,13 @@ if ($Target -eq "all") {
         } catch {}
     }
 
-    $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+    $ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "D:\Tools\gh\bin\gh.exe") { "D:\Tools\gh\bin\gh.exe" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+if ($ghExe -and -not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
+    try {
+        $tok = (& "$ghExe" auth token 2>$null | Out-String).Trim()
+        if ($tok) { $env:GH_TOKEN = $tok; $env:GITHUB_TOKEN = $tok }
+    } catch {}
+}
     if ($ghExe) {
         $releaseDir = Join-Path $repoRoot "release"
         $unifiedAssets = @()
@@ -219,20 +225,26 @@ if ($normTarget -eq "child" -or $normTarget -eq "all") {
         Set-Content -Path $targetGradlePath -Value $gradleContent -Encoding UTF8 -NoNewline
     }
 
-    Write-Host "Biên dịch Target Node (VFam Child)..." -ForegroundColor Yellow
-    Set-Location (Join-Path $repoRoot "target-node")
-    Remove-Item -Path (Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk") -Force -ErrorAction SilentlyContinue
+    $targetApkPath = Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk"
+    $destTargetApk = Join-Path $releaseDir "vfam-child-android-$Version.apk"
+    if (-not (Test-Path $destTargetApk)) {
+        Write-Host "Biên dịch Target Node (VFam Child)..." -ForegroundColor Yellow
+        Set-Location (Join-Path $repoRoot "target-node")
+        Remove-Item -Path $targetApkPath -Force -ErrorAction SilentlyContinue
 
-    .\gradlew.bat assembleDebug
-    if ($LASTEXITCODE -ne 0) {
-        Send-TgStep -Title "Biên dịch Target Node" -Message "Gradle build thất bại với exit code $LASTEXITCODE" -Status "Lỗi ❌"
-        throw "Target Node build failed with exit code $LASTEXITCODE"
+        .\gradlew.bat assembleDebug
+        if ($LASTEXITCODE -ne 0) {
+            Send-TgStep -Title "Biên dịch Target Node" -Message "Gradle build thất bại với exit code $LASTEXITCODE" -Status "Lỗi ❌"
+            throw "Target Node build failed with exit code $LASTEXITCODE"
+        }
+        if (Test-Path $targetApkPath) {
+            Copy-Item -Path $targetApkPath -Destination $destTargetApk -Force
+        }
+    } else {
+        Write-Host "Đã có sẵn $destTargetApk, sử dụng ngay!" -ForegroundColor Green
     }
     
-    $targetApkPath = Join-Path $repoRoot "target-node\app\build\outputs\apk\debug\app-debug.apk"
-    if (Test-Path $targetApkPath) {
-        $destTargetApk = Join-Path $releaseDir "vfam-child-android-$Version.apk"
-        Copy-Item -Path $targetApkPath -Destination $destTargetApk -Force
+    if (Test-Path $destTargetApk) {
         $artifacts += $destTargetApk
         $childSize = [math]::Round((Get-Item $destTargetApk).Length / 1MB, 2)
         Write-Host "Target Node APK đã sẵn sàng: $destTargetApk ($childSize MB)" -ForegroundColor Green
@@ -284,6 +296,7 @@ if ($normTarget -eq "admin" -or $normTarget -eq "all") {
 
     $flutterArgs = @(
         "build", "apk", "--release",
+        "--android-skip-build-dependency-validation",
         "--build-name=$Version",
         "--build-number=$adminBuildNumber",
         "--dart-define=APP_VERSION=$Version"
@@ -341,7 +354,13 @@ if (-not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
     } catch {}
 }
 
-$ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+$ghExe = if (Get-Command gh -ErrorAction SilentlyContinue) { "gh" } elseif (Test-Path "D:\Tools\gh\bin\gh.exe") { "D:\Tools\gh\bin\gh.exe" } elseif (Test-Path "C:\Program Files\GitHub CLI\gh.exe") { "C:\Program Files\GitHub CLI\gh.exe" } else { $null }
+if ($ghExe -and -not $env:GH_TOKEN -and -not $env:GITHUB_TOKEN) {
+    try {
+        $tok = (& "$ghExe" auth token 2>$null | Out-String).Trim()
+        if ($tok) { $env:GH_TOKEN = $tok; $env:GITHUB_TOKEN = $tok }
+    } catch {}
+}
 
 if ($ghExe) {
     Write-Host "Phát hành GitHub Release qua gh CLI..." -ForegroundColor Cyan
