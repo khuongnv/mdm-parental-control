@@ -1,10 +1,10 @@
-# 📑 Nhật Ký Thực Thi Dự Án MDM Parental Control (Audit & Execution Logs)
+﻿# 📑 Nhật Ký Thực Thi Dự Án MDM Parental Control (Audit & Execution Logs)
 
 Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, sửa lỗi, cấu hình và kiểm thử của hệ thống Swarm Agent trong dự án **MDM Parental Control**.
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
-| 2026-11-18 | [`2026-11-18_unify_versioning_and_deploy_all_v1.5.4.md`](./2026-11-18_unify_versioning_and_deploy_all_v1.5.4.md) | Thống nhất cơ chế lấy Version thực tế khi Build, đánh dấu Latest Release trên GitHub và phát hành đồng bộ v1.5.4 All | `lead-architect` | ðŸ„ Äang tiáº¿n hÃ nh |
+| 2026-11-18 | [`2026-11-18_unify_versioning_and_deploy_all_v1.5.4.md`](./2026-11-18_unify_versioning_and_deploy_all_v1.5.4.md) | Thống nhất cơ chế lấy Version thực tế khi Build, đánh dấu Latest Release trên GitHub và phát hành đồng bộ v1.5.4 All | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-18 | [`2026-11-18_complete_env_configuration.md`](./2026-11-18_complete_env_configuration.md) | Hoàn thiện cấu hình `.env` từ `.env-data` (iOS Enterprise P12/Provisioning, Supabase, Mac Build) và đồng bộ chứng chỉ ký số | `lead-architect`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-18 | [`2026-11-18_setup_dev_environment.md`](./2026-11-18_setup_dev_environment.md) | Pull source dự án từ GitHub và cài đặt trọn bộ môi trường phát triển trên Windows (Git, JDK 21, Android SDK 34 + cmdline-tools, Flutter 3.50, GitHub CLI) | `lead-architect` | ✅ Hoàn thành |
 | 2026-11-17 | [`2026-11-17_deploy_v1.5.3_all.md`](./2026-11-17_deploy_v1.5.3_all.md) | Phát hành toàn bộ ứng dụng v1.5.3 (Android Child DO Build 14, Android Admin Build 12, iOS Enterprise Build 12) | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |

@@ -113,7 +113,7 @@ function Invoke-MacScript {
     scp -o StrictHostKeyChecking=no "$tmpFile" "${macUser}@${macHost}:${remoteSh}"
     Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
     
-    $output = ssh -o StrictHostKeyChecking=no "$macUser@$macHost" "zsh -l -c 'tr -d ""`r"" < ${remoteSh} > ~/vfam-build/run.sh && zsh -l ~/vfam-build/run.sh'"
+    $output = ssh -n -o StrictHostKeyChecking=no "$macUser@$macHost" "zsh -l -c 'tr -d ""`r"" < ${remoteSh} > ~/vfam-build/run.sh && zsh -l ~/vfam-build/run.sh'"
     return $output
 }
 
@@ -185,14 +185,14 @@ if (-not (Test-Path $p12Local) -or -not (Test-Path $provLocal)) {
 }
 
 # Tạo thư mục nhận trên Mac
-ssh -o StrictHostKeyChecking=no "$macUser@$macHost" "mkdir -p ~/vfam-build/certs ~/Library/MobileDevice/'Provisioning Profiles'"
+ssh -n -o StrictHostKeyChecking=no "$macUser@$macHost" "mkdir -p ~/vfam-build/certs ~/Library/MobileDevice/'Provisioning Profiles'"
 
 # Copy file sang Mac
 scp -o StrictHostKeyChecking=no "$p12Local" "${macUser}@${macHost}:~/vfam-build/certs/VNPT_Enterprise.p12"
 scp -o StrictHostKeyChecking=no "$provLocal" "${macUser}@${macHost}:~/vfam-build/certs/$profileUuid.mobileprovision"
 
 # Đưa profile vào đúng thư mục Provisioning Profiles
-ssh -o StrictHostKeyChecking=no "$macUser@$macHost" "cp ~/vfam-build/certs/$profileUuid.mobileprovision ~/Library/MobileDevice/'Provisioning Profiles'/"
+ssh -n -o StrictHostKeyChecking=no "$macUser@$macHost" "cp ~/vfam-build/certs/$profileUuid.mobileprovision ~/Library/MobileDevice/'Provisioning Profiles'/"
 
 # Unlock Keychain và kiểm tra identity
 $keychainCmds = @"
