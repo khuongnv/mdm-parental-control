@@ -40,25 +40,50 @@ class MdmSupabaseClient @Inject constructor() {
         val onPairingSuccess: (() -> Unit)? = null
     )
 
+    data class DeviceTelemetry(
+        val batteryLevel: Int = 100,
+        val isCharging: Boolean = false,
+        val currentApp: String = "Màn hình chính",
+        val currentPackageName: String? = null,
+        val screenBrightness: Int = 50,
+        val isAutoBrightness: Boolean = false,
+        val screenMode: String = "on_unlocked",
+        val isScreenOn: Boolean = true,
+        val isDarkMode: Boolean = false,
+        val mediaVolume: Int = 50,
+        val ringVolume: Int = 50,
+        val notificationVolume: Int = 50,
+        val alarmVolume: Int = 80,
+        val ringerMode: String = "normal",
+        val isMediaMuted: Boolean = false
+    )
+
+    data class DailyAppUsageItem(
+        val packageName: String,
+        val appName: String,
+        val appCategory: String = "other",
+        val durationSeconds: Int
+    )
+
     private val callbackList = java.util.concurrent.CopyOnWriteArrayList<RealtimeCallbacks>()
     private var currentConnectedDeviceId: String? = null
     private var reconnectHandler: Handler? = null
     private var lastKnownBatteryLevel = 100
     private var lastKnownIsCharging = false
     private var lastKnownCurrentApp = "Màn hình chính"
+    private var lastKnownTelemetry: DeviceTelemetry? = null
 
     /**
      * Đồng bộ Presence (Online state & Live Telemetry) qua WebSocket Channel
      */
     fun trackPresence(
         deviceId: String,
-        batteryLevel: Int = lastKnownBatteryLevel,
-        isCharging: Boolean = lastKnownIsCharging,
-        currentApp: String = lastKnownCurrentApp
+        telemetry: DeviceTelemetry
     ) {
-        lastKnownBatteryLevel = batteryLevel
-        lastKnownIsCharging = isCharging
-        lastKnownCurrentApp = currentApp
+        lastKnownTelemetry = telemetry
+        lastKnownBatteryLevel = telemetry.batteryLevel
+        lastKnownIsCharging = telemetry.isCharging
+        lastKnownCurrentApp = telemetry.currentApp
 
         val socket = webSocket ?: return
         val topic = "realtime:device:$deviceId"
@@ -70,17 +95,48 @@ class MdmSupabaseClient @Inject constructor() {
                 put("payload", JSONObject().apply {
                     put("status", "online")
                     put("device_id", deviceId)
-                    put("battery_level", batteryLevel)
-                    put("is_charging", isCharging)
-                    put("current_app", currentApp)
-                    put("current_app_name", currentApp)
+                    put("battery_level", telemetry.batteryLevel)
+                    put("is_charging", telemetry.isCharging)
+                    put("current_app", telemetry.currentApp)
+                    put("current_app_name", telemetry.currentApp)
+                    if (telemetry.currentPackageName != null) {
+                        put("current_package_name", telemetry.currentPackageName)
+                    }
                     put("agent_version", BuildConfig.VERSION_NAME)
+                    put("screen_brightness", telemetry.screenBrightness)
+                    put("is_auto_brightness", telemetry.isAutoBrightness)
+                    put("screen_mode", telemetry.screenMode)
+                    put("is_screen_on", telemetry.isScreenOn)
+                    put("is_dark_mode", telemetry.isDarkMode)
+                    put("media_volume", telemetry.mediaVolume)
+                    put("ring_volume", telemetry.ringVolume)
+                    put("notification_volume", telemetry.notificationVolume)
+                    put("alarm_volume", telemetry.alarmVolume)
+                    put("ringer_mode", telemetry.ringerMode)
+                    put("is_media_muted", telemetry.isMediaMuted)
                     put("timestamp", System.currentTimeMillis())
                 })
             })
             put("ref", System.currentTimeMillis().toString())
         }
         socket.send(presenceMsg.toString())
+    }
+
+    fun trackPresence(
+        deviceId: String,
+        batteryLevel: Int = lastKnownBatteryLevel,
+        isCharging: Boolean = lastKnownIsCharging,
+        currentApp: String = lastKnownCurrentApp
+    ) {
+        val base = lastKnownTelemetry ?: DeviceTelemetry()
+        trackPresence(
+            deviceId,
+            base.copy(
+                batteryLevel = batteryLevel,
+                isCharging = isCharging,
+                currentApp = currentApp
+            )
+        )
     }
     private var reconnectRunnable: Runnable? = null
 
@@ -193,38 +249,69 @@ class MdmSupabaseClient @Inject constructor() {
     }
 
     /**
-     * Cập nhật Telemetry máy con lên Supabase: mức pin, trạng thái sạc, app đang mở
+     * Cập nhật Telemetry mở rộng máy con lên Supabase: pin, sạc, app, độ sáng, chế độ màn hình, âm lượng
      */
     fun updateTelemetry(
         deviceId: String,
-        batteryLevel: Int,
-        isCharging: Boolean,
-        currentApp: String
+        telemetry: DeviceTelemetry
     ) {
+        lastKnownBatteryLevel = telemetry.batteryLevel
+        lastKnownIsCharging = telemetry.isCharging
+        lastKnownCurrentApp = telemetry.currentApp
+        lastKnownTelemetry = telemetry
+
         // 1. Phát Broadcast realtime tới máy phụ huynh tức thì
         val topic = "realtime:device:$deviceId"
         val broadcastPayload = JSONObject().apply {
             put("device_id", deviceId)
-            put("battery_level", batteryLevel)
-            put("is_charging", isCharging)
-            put("current_app", currentApp)
-            put("current_app_name", currentApp)
+            put("battery_level", telemetry.batteryLevel)
+            put("is_charging", telemetry.isCharging)
+            put("current_app", telemetry.currentApp)
+            put("current_app_name", telemetry.currentApp)
+            if (telemetry.currentPackageName != null) {
+                put("current_package_name", telemetry.currentPackageName)
+            }
             put("agent_version", BuildConfig.VERSION_NAME)
+            put("screen_brightness", telemetry.screenBrightness)
+            put("is_auto_brightness", telemetry.isAutoBrightness)
+            put("screen_mode", telemetry.screenMode)
+            put("is_screen_on", telemetry.isScreenOn)
+            put("is_dark_mode", telemetry.isDarkMode)
+            put("media_volume", telemetry.mediaVolume)
+            put("ring_volume", telemetry.ringVolume)
+            put("notification_volume", telemetry.notificationVolume)
+            put("alarm_volume", telemetry.alarmVolume)
+            put("ringer_mode", telemetry.ringerMode)
+            put("is_media_muted", telemetry.isMediaMuted)
             put("timestamp", System.currentTimeMillis())
         }
         sendBroadcast(topic, "TELEMETRY_UPDATE", broadcastPayload)
 
         // 2. Cập nhật Presence trên WebSocket
-        trackPresence(deviceId, batteryLevel, isCharging, currentApp)
+        trackPresence(deviceId, telemetry)
 
-        // 3. Ghi nhận vào DB qua Supabase RPC (update_device_telemetry - SECURITY DEFINER)
+        // 3. Ghi nhận vào DB qua Supabase RPC (update_device_telemetry - 17 tham số chuẩn M1)
         val rpcUrl = "$supabaseUrl/rest/v1/rpc/update_device_telemetry"
         val rpcPayload = JSONObject().apply {
             put("p_device_id", deviceId)
-            put("p_battery_level", batteryLevel)
-            put("p_is_charging", isCharging)
-            put("p_current_app", currentApp)
+            put("p_battery_level", telemetry.batteryLevel)
+            put("p_is_charging", telemetry.isCharging)
+            put("p_current_app", telemetry.currentApp)
             put("p_agent_version", BuildConfig.VERSION_NAME)
+            if (telemetry.currentPackageName != null) {
+                put("p_current_package_name", telemetry.currentPackageName)
+            }
+            put("p_screen_brightness", telemetry.screenBrightness)
+            put("p_is_auto_brightness", telemetry.isAutoBrightness)
+            put("p_screen_mode", telemetry.screenMode)
+            put("p_is_screen_on", telemetry.isScreenOn)
+            put("p_is_dark_mode", telemetry.isDarkMode)
+            put("p_media_volume", telemetry.mediaVolume)
+            put("p_ring_volume", telemetry.ringVolume)
+            put("p_notification_volume", telemetry.notificationVolume)
+            put("p_alarm_volume", telemetry.alarmVolume)
+            put("p_ringer_mode", telemetry.ringerMode)
+            put("p_is_media_muted", telemetry.isMediaMuted)
         }
         val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
         val rpcRequest = Request.Builder()
@@ -244,7 +331,7 @@ class MdmSupabaseClient @Inject constructor() {
                     val err = response.body?.string()
                     Log.w(TAG, "RPC update_device_telemetry HTTP ${response.code}: $err")
                 } else {
-                    Log.d(TAG, "RPC update_device_telemetry succeeded ($batteryLevel%, ⚡$isCharging)")
+                    Log.d(TAG, "RPC update_device_telemetry succeeded (battery=${telemetry.batteryLevel}%, brightness=${telemetry.screenBrightness}%, mediaVol=${telemetry.mediaVolume}%)")
                 }
                 response.close()
             }
@@ -253,10 +340,24 @@ class MdmSupabaseClient @Inject constructor() {
         // 4. Ghi nhận dự phòng trực tiếp qua REST PATCH vào bảng devices
         val url = "$supabaseUrl/rest/v1/devices?id=eq.$deviceId"
         val payload = JSONObject().apply {
-            put("battery_level", batteryLevel)
-            put("is_charging", isCharging)
-            put("current_app_name", currentApp)
+            put("battery_level", telemetry.batteryLevel)
+            put("is_charging", telemetry.isCharging)
+            put("current_app_name", telemetry.currentApp)
+            if (telemetry.currentPackageName != null) {
+                put("current_package_name", telemetry.currentPackageName)
+            }
             put("agent_version", BuildConfig.VERSION_NAME)
+            put("screen_brightness", telemetry.screenBrightness)
+            put("is_auto_brightness", telemetry.isAutoBrightness)
+            put("screen_mode", telemetry.screenMode)
+            put("is_screen_on", telemetry.isScreenOn)
+            put("is_dark_mode", telemetry.isDarkMode)
+            put("media_volume", telemetry.mediaVolume)
+            put("ring_volume", telemetry.ringVolume)
+            put("notification_volume", telemetry.notificationVolume)
+            put("alarm_volume", telemetry.alarmVolume)
+            put("ringer_mode", telemetry.ringerMode)
+            put("is_media_muted", telemetry.isMediaMuted)
             val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                 timeZone = TimeZone.getTimeZone("UTC")
             }
@@ -284,11 +385,28 @@ class MdmSupabaseClient @Inject constructor() {
                     val err = response.body?.string()
                     Log.w(TAG, "REST PATCH devices HTTP ${response.code}: $err")
                 } else {
-                    Log.d(TAG, "REST PATCH devices succeeded ($batteryLevel%, ⚡$isCharging)")
+                    Log.d(TAG, "REST PATCH devices succeeded (${telemetry.batteryLevel}%, ⚡${telemetry.isCharging})")
                 }
                 response.close()
             }
         })
+    }
+
+    fun updateTelemetry(
+        deviceId: String,
+        batteryLevel: Int,
+        isCharging: Boolean,
+        currentApp: String
+    ) {
+        val base = lastKnownTelemetry ?: DeviceTelemetry()
+        updateTelemetry(
+            deviceId,
+            base.copy(
+                batteryLevel = batteryLevel,
+                isCharging = isCharging,
+                currentApp = currentApp
+            )
+        )
     }
 
     /**
@@ -587,54 +705,111 @@ class MdmSupabaseClient @Inject constructor() {
     }
 
     /**
-     * Máy con phản hồi xác nhận (ACK) khi bé nhấn vào tin nhắn nhắc nhở của phụ huynh
+     * Gửi yêu cầu kích hoạt Edge Function notify-family-parents tới phụ huynh (FCM HTTP v1 + iOS APNs)
      */
-    fun sendAckMessage(deviceId: String, messageId: String, onComplete: ((Boolean) -> Unit)? = null) {
-        val topic = "realtime:device:$deviceId"
-        val payload = JSONObject().apply {
-            put("message_id", messageId)
-            put("device_id", deviceId)
-            put("status", "acknowledged")
-            put("timestamp", System.currentTimeMillis())
-        }
-        sendBroadcast(topic, "ACK_MESSAGE", payload)
-        Log.i(TAG, "Sent ACK_MESSAGE for msgId: $messageId")
-
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-        val nowIso = sdf.format(Date())
-
-        // 1. Cập nhật bảng device_messages (hỗ trợ cả UUID hoặc fallback theo device_id)
-        val url = if (messageId.contains("-")) {
-            "$supabaseUrl/rest/v1/device_messages?id=eq.$messageId"
-        } else {
-            "$supabaseUrl/rest/v1/device_messages?device_id=eq.$deviceId&is_acknowledged=eq.false"
-        }
-
-        val updatePayload = JSONObject().apply {
-            put("is_acknowledged", true)
-            put("acknowledged_at", nowIso)
-        }
-
+    fun invokeNotifyFamilyParents(payload: JSONObject, onDone: ((Boolean) -> Unit)? = null) {
+        val url = "$supabaseUrl/functions/v1/notify-family-parents"
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
         val request = Request.Builder()
             .url(url)
-            .patch(updatePayload.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
+            .post(payload.toString().toRequestBody(mediaType))
             .addHeader("apikey", anonKey)
             .addHeader("Authorization", "Bearer $anonKey")
             .addHeader("Content-Type", "application/json")
-            .addHeader("Prefer", "return=minimal")
             .build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.w(TAG, "Failed to update device_messages in DB: ${e.message}")
+                Log.w(TAG, "notify-family-parents Edge Function call failed: ${e.message}")
+                onDone?.invoke(false)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val ok = response.isSuccessful
+                val body = response.body?.string()
+                response.close()
+                Log.i(TAG, "notify-family-parents Edge Function response HTTP ${response.code}: $body")
+                onDone?.invoke(ok)
+            }
+        })
+    }
+
+    /**
+     * Máy con phản hồi xác nhận (ACK) khi bé nhấn vào tin nhắn nhắc nhở của phụ huynh
+     */
+    fun sendAckMessage(
+        deviceId: String,
+        messageId: String,
+        replyText: String? = null,
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        val topic = "realtime:device:$deviceId"
+        val broadcastPayload = JSONObject().apply {
+            put("message_id", messageId)
+            put("device_id", deviceId)
+            put("status", "acknowledged")
+            put("reply_text", replyText ?: "Dạ con nghe rồi! 👍")
+            put("timestamp", System.currentTimeMillis())
+        }
+        sendBroadcast(topic, "ACK_MESSAGE", broadcastPayload)
+        Log.i(TAG, "Sent ACK_MESSAGE for msgId: $messageId, replyText=$replyText")
+
+        // 1. Gọi RPC acknowledge_device_message (SECURITY DEFINER)
+        val rpcUrl = "$supabaseUrl/rest/v1/rpc/acknowledge_device_message"
+        val rpcPayload = JSONObject().apply {
+            put("p_device_id", deviceId)
+            if (messageId.contains("-")) {
+                put("p_message_id", messageId)
+            }
+            if (!replyText.isNullOrBlank()) {
+                put("p_reply_text", replyText)
+            }
+        }
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+        val request = Request.Builder()
+            .url(rpcUrl)
+            .post(rpcPayload.toString().toRequestBody(mediaType))
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "Failed to call acknowledge_device_message RPC: ${e.message}")
                 onComplete?.invoke(false)
             }
+
             override fun onResponse(call: Call, response: Response) {
+                val bodyStr = response.body?.string()
                 val success = response.isSuccessful
                 response.close()
-                Log.i(TAG, "Updated device_messages in DB: success=$success")
+                var ackRecordId: String = messageId
+                if (success && !bodyStr.isNullOrEmpty()) {
+                    try {
+                        val json = JSONObject(bodyStr)
+                        val id = json.optString("id", "")
+                        if (id.isNotEmpty()) ackRecordId = id
+                    } catch (_: Exception) {}
+                }
+
+                // 2. Gửi đẩy Edge Function notify-family-parents tới Phụ huynh (FCM Android + iOS APNs)
+                val notifyPayload = JSONObject().apply {
+                    put("device_id", deviceId)
+                    put("event_type", if (!replyText.isNullOrBlank()) "DEVICE_MESSAGE_REPLY" else "DEVICE_MESSAGE_ACK")
+                    if (ackRecordId.isNotEmpty() && ackRecordId.contains("-")) {
+                        put("record_id", ackRecordId)
+                    }
+                    put("title", "Bé đã phản hồi lời nhắc")
+                    put("body", replyText ?: "Dạ con nghe rồi! 👍")
+                    put("data", JSONObject().apply {
+                        put("reply_text", replyText ?: "Dạ con nghe rồi! 👍")
+                        if (ackRecordId.isNotEmpty()) {
+                            put("record_id", ackRecordId)
+                        }
+                    })
+                }
+                invokeNotifyFamilyParents(notifyPayload)
                 onComplete?.invoke(success)
             }
         })
@@ -650,42 +825,125 @@ class MdmSupabaseClient @Inject constructor() {
         onResult: (Boolean) -> Unit
     ) {
         val topic = "realtime:device:$deviceId"
-        val payload = JSONObject().apply {
+        val broadcastPayload = JSONObject().apply {
             put("device_id", deviceId)
             put("requested_minutes", minutes)
             put("reason", reason)
             put("timestamp", System.currentTimeMillis())
         }
-        sendBroadcast(topic, "TIME_REQUEST", payload)
+        sendBroadcast(topic, "TIME_REQUEST", broadcastPayload)
         Log.i(TAG, "Sent TIME_REQUEST: +$minutes mins, reason=$reason")
 
-        // Ghi nhận bản ghi vào bảng time_requests để kích hoạt Postgres Realtime trên Admin
-        val url = "$supabaseUrl/rest/v1/time_requests"
-        val postPayload = JSONObject().apply {
-            put("device_id", deviceId)
-            put("requested_minutes", minutes)
-            put("reason", reason)
-            put("status", "pending")
+        // 1. Tạo bản ghi qua RPC create_time_request (SECURITY DEFINER tự động gán family_id)
+        val rpcUrl = "$supabaseUrl/rest/v1/rpc/create_time_request"
+        val rpcPayload = JSONObject().apply {
+            put("p_device_id", deviceId)
+            put("p_requested_minutes", minutes)
+            put("p_reason", reason)
         }
-
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
         val request = Request.Builder()
-            .url(url)
-            .post(postPayload.toString().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
+            .url(rpcUrl)
+            .post(rpcPayload.toString().toRequestBody(mediaType))
             .addHeader("apikey", anonKey)
             .addHeader("Authorization", "Bearer $anonKey")
             .addHeader("Content-Type", "application/json")
-            .addHeader("Prefer", "return=minimal")
             .build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.w(TAG, "Failed to insert time_requests in DB: ${e.message}")
+                Log.w(TAG, "Failed to call create_time_request RPC: ${e.message}")
                 onResult(true) // Broadcast was already sent
             }
+
             override fun onResponse(call: Call, response: Response) {
+                val bodyStr = response.body?.string()
                 response.close()
-                Log.i(TAG, "Inserted time_requests in DB: status=${response.code}")
+                var requestId: String? = null
+                if (response.isSuccessful && !bodyStr.isNullOrEmpty()) {
+                    try {
+                        val json = JSONObject(bodyStr)
+                        requestId = json.optString("id", json.optString("request_id", ""))
+                    } catch (_: Exception) {}
+                }
+                Log.i(TAG, "create_time_request RPC status=${response.code}, requestId=$requestId")
+
+                // 2. Gửi đẩy Edge Function notify-family-parents tới máy Phụ huynh (FCM Android + iOS APNs)
+                val notifyPayload = JSONObject().apply {
+                    put("device_id", deviceId)
+                    put("event_type", "TIME_REQUEST")
+                    if (!requestId.isNullOrEmpty()) {
+                        put("record_id", requestId)
+                    }
+                    put("title", "Yêu cầu thêm giờ chơi")
+                    put("body", if (reason.isNotBlank()) reason else "Bé xin thêm $minutes phút sử dụng")
+                    put("data", JSONObject().apply {
+                        put("requested_minutes", minutes.toString())
+                        put("reason", reason)
+                        if (!requestId.isNullOrEmpty()) {
+                            put("record_id", requestId)
+                        }
+                    })
+                }
+                invokeNotifyFamilyParents(notifyPayload)
                 onResult(true)
+            }
+        })
+    }
+
+    /**
+     * Đồng bộ thời gian sử dụng chính xác lên Backend qua RPC sync_device_daily_usage
+     */
+    fun syncDeviceDailyUsage(
+        deviceId: String,
+        usageDate: String,
+        totalSeconds: Int,
+        apps: List<DailyAppUsageItem>,
+        timezone: String = TimeZone.getDefault().id,
+        onResult: ((Boolean) -> Unit)? = null
+    ) {
+        val url = "$supabaseUrl/rest/v1/rpc/sync_device_daily_usage"
+        val appsArray = JSONArray()
+        for (app in apps) {
+            appsArray.put(JSONObject().apply {
+                put("package_name", app.packageName)
+                put("app_name", app.appName)
+                put("app_category", app.appCategory)
+                put("duration_seconds", app.durationSeconds)
+            })
+        }
+        val payload = JSONObject().apply {
+            put("p_device_id", deviceId)
+            put("p_usage_date", usageDate)
+            put("p_total_seconds", totalSeconds)
+            put("p_apps", appsArray)
+            put("p_timezone", timezone)
+        }
+        val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+        val request = Request.Builder()
+            .url(url)
+            .post(payload.toString().toRequestBody(mediaType))
+            .addHeader("apikey", anonKey)
+            .addHeader("Authorization", "Bearer $anonKey")
+            .addHeader("Content-Type", "application/json")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.w(TAG, "RPC sync_device_daily_usage failed: ${e.message}")
+                onResult?.invoke(false)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val ok = response.isSuccessful
+                val body = response.body?.string()
+                response.close()
+                if (ok) {
+                    Log.i(TAG, "RPC sync_device_daily_usage succeeded: date=$usageDate, total=${totalSeconds}s, apps=${apps.size}")
+                } else {
+                    Log.w(TAG, "RPC sync_device_daily_usage HTTP ${response.code}: $body")
+                }
+                onResult?.invoke(ok)
             }
         })
     }

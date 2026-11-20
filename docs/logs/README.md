@@ -4,6 +4,7 @@ Tài liệu này lưu trữ danh mục toàn bộ các bước triển khai, s�
 
 | Ngày | Tệp Nhật Ký | Nội Dung Nhiệm Vụ | Agent Phụ Trách | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- |
+| 2026-11-20 | [`2026-11-20_fix_notifications_telemetry_usage_sync.md`](./2026-11-20_fix_notifications_telemetry_usage_sync.md) | Khắc phục thông báo 2 chiều (Realtime/FCM), mở rộng Telemetry thiết bị con & đồng bộ chính xác thời gian sử dụng | `lead-architect`, `backend-sync-specialist`, `device-owner-specialist`, `usage-tracking-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-18 | [`2026-11-18_unify_versioning_and_deploy_all_v1.5.4.md`](./2026-11-18_unify_versioning_and_deploy_all_v1.5.4.md) | Thống nhất cơ chế lấy Version thực tế khi Build, đánh dấu Latest Release trên GitHub và phát hành đồng bộ v1.5.4 All | `lead-architect`, `device-owner-specialist`, `parent-ui-specialist`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-18 | [`2026-11-18_complete_env_configuration.md`](./2026-11-18_complete_env_configuration.md) | Hoàn thiện cấu hình `.env` từ `.env-data` (iOS Enterprise P12/Provisioning, Supabase, Mac Build) và đồng bộ chứng chỉ ký số | `lead-architect`, `qa-security-perf-specialist` | ✅ Hoàn thành |
 | 2026-11-18 | [`2026-11-18_setup_dev_environment.md`](./2026-11-18_setup_dev_environment.md) | Pull source dự án từ GitHub và cài đặt trọn bộ môi trường phát triển trên Windows (Git, JDK 21, Android SDK 34 + cmdline-tools, Flutter 3.50, GitHub CLI) | `lead-architect` | ✅ Hoàn thành |

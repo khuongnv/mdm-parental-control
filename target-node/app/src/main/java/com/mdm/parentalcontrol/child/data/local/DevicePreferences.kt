@@ -52,6 +52,44 @@ class DevicePreferences @Inject constructor(
         get() = prefs.getInt(KEY_BASE_DAILY_LIMIT, 120)
         set(value) = prefs.edit().putInt(KEY_BASE_DAILY_LIMIT, value).apply()
 
+    var lastUsageQueryTime: Long
+        get() = prefs.getLong(KEY_LAST_USAGE_QUERY_TIME, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_USAGE_QUERY_TIME, value).apply()
+
+    var activeUsagePackage: String?
+        get() = prefs.getString(KEY_ACTIVE_USAGE_PACKAGE, null)
+        set(value) = prefs.edit().putString(KEY_ACTIVE_USAGE_PACKAGE, value).apply()
+
+    var activeUsageResumeTime: Long
+        get() = prefs.getLong(KEY_ACTIVE_USAGE_RESUME_TIME, 0L)
+        set(value) = prefs.edit().putLong(KEY_ACTIVE_USAGE_RESUME_TIME, value).apply()
+
+    var lastTrackedUsageDate: String?
+        get() = prefs.getString(KEY_LAST_TRACKED_USAGE_DATE, null)
+        set(value) = prefs.edit().putString(KEY_LAST_TRACKED_USAGE_DATE, value).apply()
+
+    var lastUsageSyncTime: Long
+        get() = prefs.getLong(KEY_LAST_USAGE_SYNC_TIME, 0L)
+        set(value) = prefs.edit().putLong(KEY_LAST_USAGE_SYNC_TIME, value).apply()
+
+    var lastResetDate: String?
+        get() = prefs.getString(KEY_LAST_RESET_DATE, null)
+        set(value) = prefs.edit().putString(KEY_LAST_RESET_DATE, value).apply()
+
+    fun saveUsageTrackerState(
+        activePackage: String?,
+        activeResumeTime: Long,
+        lastQueryTime: Long,
+        trackedDate: String? = lastTrackedUsageDate
+    ) {
+        prefs.edit()
+            .putString(KEY_ACTIVE_USAGE_PACKAGE, activePackage)
+            .putLong(KEY_ACTIVE_USAGE_RESUME_TIME, activeResumeTime)
+            .putLong(KEY_LAST_USAGE_QUERY_TIME, lastQueryTime)
+            .putString(KEY_LAST_TRACKED_USAGE_DATE, trackedDate)
+            .apply()
+    }
+
     fun savePairing(deviceId: String, otpCode: String?, deviceName: String?, qrToken: String? = null, createdAt: Long = System.currentTimeMillis()) {
         prefs.edit()
             .putString(KEY_DEVICE_ID, deviceId)
@@ -99,5 +137,11 @@ class DevicePreferences @Inject constructor(
         private const val KEY_PAIRED_AT = "paired_at"
         private const val KEY_PAIRING_CREATED_AT = "pairing_created_at"
         private const val KEY_BASE_DAILY_LIMIT = "base_daily_limit"
+        private const val KEY_LAST_USAGE_QUERY_TIME = "last_usage_query_time"
+        private const val KEY_ACTIVE_USAGE_PACKAGE = "active_usage_package"
+        private const val KEY_ACTIVE_USAGE_RESUME_TIME = "active_usage_resume_time"
+        private const val KEY_LAST_TRACKED_USAGE_DATE = "last_tracked_usage_date"
+        private const val KEY_LAST_USAGE_SYNC_TIME = "last_usage_sync_time"
+        private const val KEY_LAST_RESET_DATE = "last_reset_date"
     }
 }

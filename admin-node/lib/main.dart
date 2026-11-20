@@ -1,7 +1,15 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart' hide AppleNotification;
+import 'models/daily_usage_report.dart';
+import 'models/device_telemetry_snapshot.dart';
+import 'models/notification_payload.dart';
+import 'services/notification_deduplicator.dart';
+import 'services/fcm_notification_service.dart';
 import 'services/mdm_supabase_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/activity_history_service.dart';
@@ -12,6 +20,32 @@ import 'widgets/qr_pairing_sheet.dart';
 import 'widgets/family_management_sheet.dart';
 import 'utils/system_font_manager.dart';
 import 'utils/theme_manager.dart';
+
+/// Top-level FCM Background Message Handler (R1)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  debugPrint('📥 FCM Background message received: ${message.messageId}, data: ${message.data}');
+  try {
+    final payload = ParentNotificationPayload.fromMap(message.data);
+    final dedupKey = payload.recordId != null && payload.recordId!.isNotEmpty
+        ? '${payload.eventType}:${payload.recordId}'
+        : 'fcm:${message.messageId}';
+    final acquired = await NotificationDeduplicator.instance.tryAcquire(dedupKey);
+    if (!acquired) {
+      debugPrint('⏭️ FCM background message already processed ($dedupKey), skipping duplicate tray notification');
+      return;
+    }
+    final copy = payload.buildCopy();
+    await SystemNotificationService().showNotification(
+      id: payload.notificationId,
+      title: copy.title,
+      body: copy.body,
+      payload: message.data['record_id']?.toString(),
+    );
+  } catch (e) {
+    debugPrint('⚠️ Error in _firebaseMessagingBackgroundHandler: $e');
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +64,14 @@ void main() async {
   } catch (e) {
     debugPrint('Supabase init error: $e');
   }
+
+  // Khởi tạo Firebase & FCM Push Notifications cho Phụ Huynh (R1)
+  try {
+    await FcmNotificationService.instance.initialize();
+  } catch (e) {
+    debugPrint('⚠️ FcmNotificationService.initialize skipped or failed: $e');
+  }
+
   // Khởi động dịch vụ chạy ngầm duy trì socket liên tục khi khóa màn hình
   try {
     const MethodChannel('vn.hanoi.khuongnv.vfam.admin/updater').invokeMethod('startBackgroundService');
@@ -448,6 +490,28 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
   int dailyLimitMinutes = 120;
   String quotaMode = 'daily';
 
+  // Extended Telemetry (R2)
+  DeviceTelemetrySnapshot telemetrySnapshot = const DeviceTelemetrySnapshot();
+  int? screenBrightness;
+  bool isAutoBrightness = false;
+  String screenMode = 'unknown';
+  bool isScreenOn = true;
+  bool isDarkMode = false;
+  int? mediaVolume;
+  int? ringVolume;
+  int? notificationVolume;
+  int? alarmVolume;
+  String ringerMode = 'normal';
+  bool isMediaMuted = false;
+
+  // Exact Usage Tracking (R3)
+  DailyUsageReport dailyUsageReport = DailyUsageReport.empty(formatLocalDateYmd());
+  int todayUsageSeconds = 0;
+
+  StreamSubscription<RemoteMessage>? _fcmForegroundSub;
+  StreamSubscription<RemoteMessage>? _fcmOpenedAppSub;
+  StreamSubscription<String>? _fcmTokenRefreshSub;
+
   RealtimeChannel? _deviceRealtimeChannel;
   Timer? _syncTimer;
   final Set<String> _notifiedAckMessageIds = {};
@@ -458,6 +522,7 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initFirebaseMessaging();
     _loadDeviceData();
     _startPeriodicSyncTimer();
   }
@@ -465,6 +530,9 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _fcmForegroundSub?.cancel();
+    _fcmOpenedAppSub?.cancel();
+    _fcmTokenRefreshSub?.cancel();
     _syncTimer?.cancel();
     _deviceRealtimeChannel?.unsubscribe();
     super.dispose();
@@ -479,6 +547,93 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
         _subscribeToActiveDevice(devId);
         _syncPendingEvents(devId);
       }
+    }
+  }
+
+  Future<void> _initFirebaseMessaging() async {
+    try {
+      await FcmNotificationService.instance.startListening(
+        onForeground: _handleIncomingRemoteFcm,
+        onTapped: _handleFcmNotificationTap,
+      );
+    } catch (e) {
+      debugPrint('⚠️ _initFirebaseMessaging skipped or error: $e');
+    }
+  }
+
+  Future<void> _registerPushToken(String token) async {
+    final platform = Platform.isIOS ? 'ios' : (Platform.isMacOS ? 'macos' : 'android');
+    await MdmSupabaseService.registerParentPushToken(
+      token,
+      platform: platform,
+      deviceLabel: 'Parent ${Platform.operatingSystem}',
+    );
+  }
+
+  Future<void> _handleIncomingRemoteFcm(RemoteMessage message) async {
+    debugPrint('🔔 FCM Foreground message received: ${message.messageId}, data: ${message.data}');
+    try {
+      final payload = ParentNotificationPayload.fromMap(message.data);
+      final dedupKey = payload.dedupKey ??
+          (payload.recordId != null && payload.recordId!.isNotEmpty
+              ? '${payload.eventType}:${payload.recordId}'
+              : 'fcm:${message.messageId}');
+      final acquired = await NotificationDeduplicator.instance.tryAcquire(dedupKey);
+      if (!acquired) {
+        debugPrint('⏭️ FCM foreground message already deduplicated: $dedupKey');
+        return;
+      }
+
+      if (payload.isTimeRequest) {
+        _handleTimeRequest(message.data);
+      } else if (payload.isAckMessage) {
+        _handleAckMessage(message.data);
+      } else {
+        final copy = payload.buildCopy();
+        await SystemNotificationService().showNotification(
+          id: payload.notificationId,
+          title: copy.title,
+          body: copy.body,
+          payload: payload.recordId,
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error handling incoming FCM: $e');
+    }
+  }
+
+  void _handleFcmNotificationTap(Map<String, dynamic> data) {
+    debugPrint('👆 FCM notification tapped: $data');
+    final payload = ParentNotificationPayload.fromMap(data);
+    if (payload.isTimeRequest) {
+      _showTimeRequestDialog(data);
+    } else if (payload.isAckMessage) {
+      final deviceName = payload.deviceName ?? activeDevice?['custom_name'] ?? 'Bé';
+      if (mounted) {
+        AppleNotification.show(
+          context,
+          title: 'Bé Đã Phản Hồi! 👍',
+          message: '$deviceName: "${payload.childReply ?? 'Dạ con nghe rồi!'}"',
+          icon: Icons.check_circle_rounded,
+          iconColor: AppleTheme.appleGreen,
+        );
+      }
+    }
+  }
+
+  Future<void> _loadDeviceDailyUsage(String deviceId) async {
+    try {
+      final report = await _supabaseService.getDeviceDailyUsage(deviceId);
+      if (mounted) {
+        setState(() {
+          dailyUsageReport = report;
+          if (report.totalSeconds > 0 || todayUsageSeconds == 0) {
+            todayUsageSeconds = report.totalSeconds;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error loading device daily usage: $e');
     }
   }
 
@@ -519,6 +674,14 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
             isOnline = false;
             currentAppName = null;
             batteryLevel = null;
+            screenBrightness = null;
+            mediaVolume = null;
+            ringVolume = null;
+            notificationVolume = null;
+            alarmVolume = null;
+            todayUsageSeconds = 0;
+            telemetrySnapshot = const DeviceTelemetrySnapshot();
+            dailyUsageReport = DailyUsageReport.empty(formatLocalDateYmd());
           });
         }
       }
@@ -545,18 +708,35 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
       } catch (_) {}
     }
 
+    final snapshot = DeviceTelemetrySnapshot.fromMap(dev);
+    final rawTodayUsageSec = (dev['today_usage_seconds'] as num?)?.toInt() ?? 0;
+
     setState(() {
       activeDevice = dev;
       isEmergencyLocked = dev['is_locked'] == true;
       extraTimeMinutes = rawExtra;
-      currentAppName = dev['current_app_name'] as String?;
-      batteryLevel = (dev['battery_level'] as num?)?.toInt();
-      isCharging = dev['is_charging'] == true;
+      currentAppName = snapshot.currentAppName;
+      batteryLevel = snapshot.batteryLevel;
+      isCharging = snapshot.isCharging;
+      screenBrightness = snapshot.screenBrightness;
+      isAutoBrightness = snapshot.isAutoBrightness;
+      screenMode = snapshot.screenMode;
+      isScreenOn = snapshot.isScreenOn;
+      isDarkMode = snapshot.isDarkMode;
+      mediaVolume = snapshot.mediaVolume;
+      ringVolume = snapshot.ringVolume;
+      notificationVolume = snapshot.notificationVolume;
+      alarmVolume = snapshot.alarmVolume;
+      ringerMode = snapshot.ringerMode;
+      isMediaMuted = snapshot.isMediaMuted;
+      telemetrySnapshot = snapshot;
+      todayUsageSeconds = rawTodayUsageSec;
       dailyLimitMinutes = (dev['daily_screen_time_limit_mins'] as num?)?.toInt() ?? 120;
       quotaMode = (dev['rule_type'] as String?) ?? 'daily';
     });
 
     final deviceId = dev['id'] as String;
+    _loadDeviceDailyUsage(deviceId);
     _subscribeToActiveDevice(deviceId);
   }
 
@@ -577,18 +757,24 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
         setState(() {
           isOnline = online;
           if (meta != null) {
-            if (meta['battery_level'] != null) {
-              batteryLevel = (meta['battery_level'] as num).toInt();
-              activeDevice?['battery_level'] = batteryLevel;
-            }
-            if (meta['is_charging'] != null) {
-              isCharging = meta['is_charging'] == true;
-              activeDevice?['is_charging'] = isCharging;
-            }
-            final appName = meta['current_app'] ?? meta['current_app_name'];
-            if (appName != null) {
-              currentAppName = appName.toString();
-              activeDevice?['current_app_name'] = currentAppName;
+            telemetrySnapshot = telemetrySnapshot.mergeFrom(meta);
+            if (telemetrySnapshot.batteryLevel != null) batteryLevel = telemetrySnapshot.batteryLevel;
+            isCharging = telemetrySnapshot.isCharging;
+            if (telemetrySnapshot.currentAppName != null) currentAppName = telemetrySnapshot.currentAppName;
+            screenBrightness = telemetrySnapshot.screenBrightness;
+            isAutoBrightness = telemetrySnapshot.isAutoBrightness;
+            screenMode = telemetrySnapshot.screenMode;
+            isScreenOn = telemetrySnapshot.isScreenOn;
+            isDarkMode = telemetrySnapshot.isDarkMode;
+            mediaVolume = telemetrySnapshot.mediaVolume;
+            ringVolume = telemetrySnapshot.ringVolume;
+            notificationVolume = telemetrySnapshot.notificationVolume;
+            alarmVolume = telemetrySnapshot.alarmVolume;
+            ringerMode = telemetrySnapshot.ringerMode;
+            isMediaMuted = telemetrySnapshot.isMediaMuted;
+            if (meta['today_usage_seconds'] != null) {
+              final sec = (meta['today_usage_seconds'] as num).toInt();
+              if (sec > todayUsageSeconds) todayUsageSeconds = sec;
             }
             if (meta['agent_version'] != null) {
               activeDevice?['agent_version'] = meta['agent_version'];
@@ -610,18 +796,24 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
       final data = (payload['payload'] is Map) ? Map<String, dynamic>.from(payload['payload'] as Map) : payload;
       if (mounted) {
         setState(() {
-          if (data['battery_level'] != null) {
-            batteryLevel = (data['battery_level'] as num).toInt();
-            activeDevice?['battery_level'] = batteryLevel;
-          }
-          if (data['is_charging'] != null) {
-            isCharging = data['is_charging'] == true;
-            activeDevice?['is_charging'] = isCharging;
-          }
-          final appName = data['current_app'] ?? data['current_app_name'];
-          if (appName != null) {
-            currentAppName = appName.toString();
-            activeDevice?['current_app_name'] = currentAppName;
+          telemetrySnapshot = telemetrySnapshot.mergeFrom(data);
+          if (telemetrySnapshot.batteryLevel != null) batteryLevel = telemetrySnapshot.batteryLevel;
+          isCharging = telemetrySnapshot.isCharging;
+          if (telemetrySnapshot.currentAppName != null) currentAppName = telemetrySnapshot.currentAppName;
+          screenBrightness = telemetrySnapshot.screenBrightness;
+          isAutoBrightness = telemetrySnapshot.isAutoBrightness;
+          screenMode = telemetrySnapshot.screenMode;
+          isScreenOn = telemetrySnapshot.isScreenOn;
+          isDarkMode = telemetrySnapshot.isDarkMode;
+          mediaVolume = telemetrySnapshot.mediaVolume;
+          ringVolume = telemetrySnapshot.ringVolume;
+          notificationVolume = telemetrySnapshot.notificationVolume;
+          alarmVolume = telemetrySnapshot.alarmVolume;
+          ringerMode = telemetrySnapshot.ringerMode;
+          isMediaMuted = telemetrySnapshot.isMediaMuted;
+          if (data['today_usage_seconds'] != null) {
+            final sec = (data['today_usage_seconds'] as num).toInt();
+            if (sec > todayUsageSeconds) todayUsageSeconds = sec;
           }
           if (data['agent_version'] != null) {
             activeDevice?['agent_version'] = data['agent_version'];
@@ -711,18 +903,23 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
         final newRecord = payload.newRecord;
         if (mounted) {
           setState(() {
-            if (newRecord['battery_level'] != null) {
-              batteryLevel = (newRecord['battery_level'] as num).toInt();
-              activeDevice?['battery_level'] = batteryLevel;
-            }
-            if (newRecord['is_charging'] != null) {
-              isCharging = newRecord['is_charging'] == true;
-              activeDevice?['is_charging'] = isCharging;
-            }
-            final appName = newRecord['current_app_name'] ?? newRecord['current_app'];
-            if (appName != null) {
-              currentAppName = appName.toString();
-              activeDevice?['current_app_name'] = currentAppName;
+            telemetrySnapshot = telemetrySnapshot.mergeFrom(newRecord);
+            if (telemetrySnapshot.batteryLevel != null) batteryLevel = telemetrySnapshot.batteryLevel;
+            isCharging = telemetrySnapshot.isCharging;
+            if (telemetrySnapshot.currentAppName != null) currentAppName = telemetrySnapshot.currentAppName;
+            screenBrightness = telemetrySnapshot.screenBrightness;
+            isAutoBrightness = telemetrySnapshot.isAutoBrightness;
+            screenMode = telemetrySnapshot.screenMode;
+            isScreenOn = telemetrySnapshot.isScreenOn;
+            isDarkMode = telemetrySnapshot.isDarkMode;
+            mediaVolume = telemetrySnapshot.mediaVolume;
+            ringVolume = telemetrySnapshot.ringVolume;
+            notificationVolume = telemetrySnapshot.notificationVolume;
+            alarmVolume = telemetrySnapshot.alarmVolume;
+            ringerMode = telemetrySnapshot.ringerMode;
+            isMediaMuted = telemetrySnapshot.isMediaMuted;
+            if (newRecord['today_usage_seconds'] != null) {
+              todayUsageSeconds = (newRecord['today_usage_seconds'] as num).toInt();
             }
             if (newRecord['agent_version'] != null) {
               activeDevice?['agent_version'] = newRecord['agent_version'];
@@ -732,8 +929,35 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
               familyDevices[idx] = Map<String, dynamic>.from(familyDevices[idx])..addAll(newRecord);
             }
           });
+          _loadDeviceDailyUsage(deviceId);
         }
       },
+    );
+
+    // 3.4. Cập nhật chi tiết sử dụng theo app
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'daily_app_usage',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'device_id',
+        value: deviceId,
+      ),
+      callback: (_) => _loadDeviceDailyUsage(deviceId),
+    );
+
+    // 3.5. Cập nhật tóm tắt sử dụng ngày
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'daily_usage_summaries',
+      filter: PostgresChangeFilter(
+        type: PostgresChangeFilterType.eq,
+        column: 'device_id',
+        value: deviceId,
+      ),
+      callback: (_) => _loadDeviceDailyUsage(deviceId),
     );
 
     channel.subscribe();
@@ -780,23 +1004,29 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
       // 3. Đồng bộ Telemetry & trạng thái mới nhất từ bảng devices
       final devData = await MdmSupabaseService.client
           .from('devices')
-          .select('battery_level, is_charging, current_app_name, is_locked, extra_time_minutes, agent_version')
+          .select('battery_level, is_charging, current_app_name, current_package_name, is_locked, extra_time_minutes, agent_version, screen_brightness, is_auto_brightness, screen_mode, is_screen_on, is_dark_mode, media_volume, ring_volume, notification_volume, alarm_volume, ringer_mode, is_media_muted, today_usage_seconds, today_usage_date')
           .eq('id', deviceId)
           .maybeSingle();
 
       if (devData != null && mounted) {
         setState(() {
-          if (devData['battery_level'] != null) {
-            batteryLevel = (devData['battery_level'] as num).toInt();
-            activeDevice?['battery_level'] = batteryLevel;
-          }
-          if (devData['is_charging'] != null) {
-            isCharging = devData['is_charging'] == true;
-            activeDevice?['is_charging'] = isCharging;
-          }
-          if (devData['current_app_name'] != null) {
-            currentAppName = devData['current_app_name'] as String;
-            activeDevice?['current_app_name'] = currentAppName;
+          telemetrySnapshot = telemetrySnapshot.mergeFrom(devData);
+          if (telemetrySnapshot.batteryLevel != null) batteryLevel = telemetrySnapshot.batteryLevel;
+          isCharging = telemetrySnapshot.isCharging;
+          if (telemetrySnapshot.currentAppName != null) currentAppName = telemetrySnapshot.currentAppName;
+          screenBrightness = telemetrySnapshot.screenBrightness;
+          isAutoBrightness = telemetrySnapshot.isAutoBrightness;
+          screenMode = telemetrySnapshot.screenMode;
+          isScreenOn = telemetrySnapshot.isScreenOn;
+          isDarkMode = telemetrySnapshot.isDarkMode;
+          mediaVolume = telemetrySnapshot.mediaVolume;
+          ringVolume = telemetrySnapshot.ringVolume;
+          notificationVolume = telemetrySnapshot.notificationVolume;
+          alarmVolume = telemetrySnapshot.alarmVolume;
+          ringerMode = telemetrySnapshot.ringerMode;
+          isMediaMuted = telemetrySnapshot.isMediaMuted;
+          if (devData['today_usage_seconds'] != null) {
+            todayUsageSeconds = (devData['today_usage_seconds'] as num).toInt();
           }
           if (devData['agent_version'] != null) {
             activeDevice?['agent_version'] = devData['agent_version'];
@@ -823,6 +1053,7 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
             familyDevices[idx] = Map<String, dynamic>.from(familyDevices[idx])..addAll(devData);
           }
         });
+        _loadDeviceDailyUsage(deviceId);
       }
     } catch (e) {
       debugPrint('⚠️ Error in _syncPendingEvents: $e');
@@ -832,7 +1063,7 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
   DateTime? _lastAckNotificationTime;
   String? _lastAckMessageId;
 
-  void _handleAckMessage(Map<String, dynamic> rawPayload) {
+  Future<void> _handleAckMessage(Map<String, dynamic> rawPayload) async {
     final payload = (rawPayload['payload'] is Map)
         ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
         : rawPayload;
@@ -840,6 +1071,11 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
     if (msgId != null && msgId.isNotEmpty) {
       if (_notifiedAckMessageIds.contains(msgId)) return;
       _notifiedAckMessageIds.add(msgId);
+      final acquired = await NotificationDeduplicator.instance.tryAcquire('device_message:$msgId');
+      if (!acquired) {
+        debugPrint('⏭️ Ack message already deduplicated ($msgId)');
+        return;
+      }
     }
     final now = DateTime.now();
     if (_lastAckMessageId == msgId && _lastAckNotificationTime != null &&
@@ -873,7 +1109,7 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
   }
 
   DateTime? _lastTimeRequestNotificationTime;
-  void _handleTimeRequest(Map<String, dynamic> rawPayload) {
+  Future<void> _handleTimeRequest(Map<String, dynamic> rawPayload) async {
     final payload = (rawPayload['payload'] is Map)
         ? Map<String, dynamic>.from(rawPayload['payload'] as Map)
         : rawPayload;
@@ -881,6 +1117,11 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
     if (reqId != null && reqId.isNotEmpty) {
       if (_notifiedTimeRequestIds.contains(reqId)) return;
       _notifiedTimeRequestIds.add(reqId);
+      final acquired = await NotificationDeduplicator.instance.tryAcquire('time_request:$reqId');
+      if (!acquired) {
+        debugPrint('⏭️ Time request already deduplicated ($reqId)');
+        return;
+      }
     }
     final now = DateTime.now();
     if (_lastTimeRequestNotificationTime != null &&
@@ -2405,15 +2646,96 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            // Extended Telemetry Badges Row (R2)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: context.isDark ? AppleTheme.darkSurfaceElevated.withValues(alpha: 0.5) : AppleTheme.lightSurfaceVariant.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  // Brightness
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          isAutoBrightness ? Icons.brightness_auto_rounded : Icons.brightness_medium_rounded,
+                          size: 14,
+                          color: AppleTheme.appleAmber,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            screenBrightness != null ? '$screenBrightness%${isAutoBrightness ? ' (A)' : ''}' : '--',
+                            style: AppleTypography.labelSmall.copyWith(fontSize: 11, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Screen Mode
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          isScreenOn ? Icons.phone_android_rounded : Icons.phone_android_outlined,
+                          size: 14,
+                          color: isScreenOn ? AppleTheme.appleGreen : AppleTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            telemetrySnapshot.screenModeLabel,
+                            style: AppleTypography.labelSmall.copyWith(fontSize: 11, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Volume & Ringer
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          isMediaMuted
+                              ? Icons.volume_off_rounded
+                              : (ringerMode == 'vibrate' ? Icons.vibration_rounded : Icons.volume_up_rounded),
+                          size: 14,
+                          color: isMediaMuted ? AppleTheme.appleRed : AppleTheme.appleBlue,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            mediaVolume != null ? '$mediaVolume% • ${telemetrySnapshot.ringerModeLabel}' : telemetrySnapshot.ringerModeLabel,
+                            style: AppleTypography.labelSmall.copyWith(fontSize: 11, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ],
       ),
     );
   }
 
-  /// Thẻ Hạn Mức Quota (P2-ADMIN-05)
+  /// Thẻ Hạn Mức Quota (P2-ADMIN-05 & R3)
   Widget _buildQuotaGroupCard() {
     final totalAllowedMins = dailyLimitMinutes + extraTimeMinutes;
+    final progress = computeQuotaProgress(todayUsageSeconds, totalAllowedMins, isLocked: isEmergencyLocked);
+    final remainingSec = computeRemainingSeconds(todayUsageSeconds, totalAllowedMins);
+    final isExceeded = totalAllowedMins > 0 && todayUsageSeconds >= totalAllowedMins * 60;
+    final progressColor = isEmergencyLocked || isExceeded
+        ? AppleTheme.appleRed
+        : (progress >= 0.85 ? AppleTheme.appleAmber : AppleTheme.appleGreen);
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -2427,14 +2749,32 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(
-                '${totalAllowedMins ~/ 60}h ${totalAllowedMins % 60}m Cho Phép',
-                style: AppleTypography.headlineLarge.copyWith(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.35,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    formatUsageDuration(todayUsageSeconds),
+                    style: AppleTypography.headlineLarge.copyWith(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.35,
+                      color: isExceeded ? AppleTheme.appleRed : context.textPrimaryColor,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '/ ${totalAllowedMins ~/ 60}h ${totalAllowedMins % 60}m Cho Phép',
+                    style: AppleTypography.bodyMedium.copyWith(
+                      fontSize: 14,
+                      color: AppleTheme.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
               Row(
                 children: [
@@ -2476,12 +2816,10 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: isEmergencyLocked ? 1.0 : 0.35,
+              value: progress,
               minHeight: 7,
               backgroundColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.appleAmber,
-              ),
+              valueColor: AlwaysStoppedAnimation<Color>(progressColor),
             ),
           ),
           const SizedBox(height: 10),
@@ -2492,11 +2830,13 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
                 child: Text(
                   isEmergencyLocked
                       ? '🚨 Thiết bị đang ở trạng thái Khóa Khẩn Cấp.'
-                      : '🛡️ Thiết bị đang trong khung giờ an toàn (Reset 00:00).',
+                      : (isExceeded
+                          ? '⛔ Đã hết thời lượng được phép hôm nay.'
+                          : '🛡️ Còn lại ${formatUsageDuration(remainingSec)} • Reset lúc 00:00.'),
                   style: AppleTypography.bodyMedium.copyWith(
                     fontSize: 13,
-                    color: isEmergencyLocked ? AppleTheme.appleRed : AppleTheme.textSecondary,
-                    fontWeight: isEmergencyLocked ? FontWeight.w600 : FontWeight.w400,
+                    color: isEmergencyLocked || isExceeded ? AppleTheme.appleRed : AppleTheme.textSecondary,
+                    fontWeight: isEmergencyLocked || isExceeded ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
               ),
@@ -2513,6 +2853,56 @@ class _DashboardTabState extends State<DashboardTab> with WidgetsBindingObserver
               ),
             ],
           ),
+          if (dailyUsageReport.apps.isNotEmpty) ...[
+            Divider(color: context.hairlineDividerColor, height: 20),
+            Text(
+              'ỨNG DỤNG DÙNG NHIỀU HÔM NAY',
+              style: AppleTypography.labelSmall.copyWith(
+                fontSize: 11,
+                letterSpacing: 0.8,
+                color: AppleTheme.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...dailyUsageReport.apps.take(3).map((app) {
+              final appShare = app.shareOf(dailyUsageReport.totalSeconds);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        app.appName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppleTypography.bodyMedium.copyWith(fontSize: 13, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 4,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(3),
+                        child: LinearProgressIndicator(
+                          value: appShare,
+                          minHeight: 5,
+                          backgroundColor: context.isDark ? AppleTheme.darkSurfaceElevated : AppleTheme.lightSurfaceVariant,
+                          valueColor: const AlwaysStoppedAnimation<Color>(AppleTheme.appleBlue),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      formatUsageDuration(app.durationSeconds),
+                      style: AppleTypography.labelSmall.copyWith(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );

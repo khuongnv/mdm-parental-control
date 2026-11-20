@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/daily_usage_report.dart';
 
 class MdmSupabaseService {
   static const String defaultUrl = String.fromEnvironment(
@@ -754,5 +755,67 @@ class MdmSupabaseService {
         'granted_minutes': approve ? grantedMinutes : 0,
       });
     } catch (_) {}
+  }
+
+  /// Đăng ký FCM Push Token cho thiết bị phụ huynh (Android / iOS APNs) vào bảng parent_push_tokens (R1)
+  static Future<void> registerParentPushToken(
+    String token, {
+    String platform = 'android',
+    String? deviceLabel,
+  }) async {
+    try {
+      final user = client.auth.currentUser;
+      if (user == null) {
+        debugPrint('⚠️ Parent user not authenticated yet, skipping registerParentPushToken');
+        return;
+      }
+      await client.rpc('upsert_parent_push_token', params: {
+        'p_fcm_token': token.trim(),
+        'p_platform': platform.toLowerCase(),
+        'p_device_label': deviceLabel,
+      });
+      debugPrint('✅ Parent push token registered in Supabase: $token ($platform)');
+    } catch (e) {
+      debugPrint('⚠️ Error registering parent push token: $e');
+    }
+  }
+
+  /// Lấy báo cáo thời gian sử dụng chính xác theo ngày cho máy con (R3)
+  Future<DailyUsageReport> getDeviceDailyUsage(String deviceId, {String? date}) async {
+    final effectiveDate = date ?? DateTime.now().toIso8601String().substring(0, 10);
+    try {
+      // 1. Lấy chi tiết từng app từ daily_app_usage
+      final appRows = await client
+          .from('daily_app_usage')
+          .select()
+          .eq('device_id', deviceId)
+          .eq('usage_date', effectiveDate)
+          .order('duration_seconds', ascending: false);
+
+      // 2. Lấy bản tóm tắt từ daily_usage_summaries
+      final summaryRows = await client
+          .from('daily_usage_summaries')
+          .select()
+          .eq('device_id', deviceId)
+          .eq('date', effectiveDate)
+          .limit(1);
+
+      // 3. Lấy dữ liệu cache từ bảng devices
+      final deviceRow = await client
+          .from('devices')
+          .select('today_usage_seconds, today_usage_date')
+          .eq('id', deviceId)
+          .maybeSingle();
+
+      return DailyUsageReport.reconcile(
+        usageDate: effectiveDate,
+        appUsageRows: appRows,
+        summaryRow: summaryRows.isNotEmpty ? summaryRows.first : null,
+        deviceRow: deviceRow,
+      );
+    } catch (e) {
+      debugPrint('⚠️ Error fetching daily usage for device $deviceId: $e');
+      return DailyUsageReport.empty(effectiveDate);
+    }
   }
 }

@@ -59,6 +59,14 @@
                 android:value="vfam_parent_monitoring_and_alerts" />
         </service>
 
+        <!-- Default FCM notification channel & icon for background alerts -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="vfam_admin_alerts" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

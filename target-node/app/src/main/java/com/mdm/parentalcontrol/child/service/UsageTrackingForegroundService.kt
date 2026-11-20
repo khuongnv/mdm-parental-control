@@ -1,5 +1,6 @@
 package com.mdm.parentalcontrol.child.service
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,8 +14,11 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -72,6 +76,9 @@ class UsageTrackingForegroundService : LifecycleService() {
                     stopAdaptivePolling()
                     ensureSupabaseConnection()
                     checkAndReportTelemetry(force = true)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        syncUsageToBackend(force = true)
+                    }
                 }
             }
         }
@@ -359,13 +366,11 @@ class UsageTrackingForegroundService : LifecycleService() {
     private suspend fun updateDailyUsage(packageName: String, sessionMs: Long) {
         if (sessionMs <= 0 || packageName == this.packageName) return // Ignore self
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        usageDao.upsertDailyUsage(
-            DailyAppUsageEntity(
-                packageName = packageName,
-                date = today,
-                totalTimeInForegroundMs = sessionMs,
-                lastUpdated = System.currentTimeMillis()
-            )
+        usageDao.incrementDailyUsage(
+            packageName = packageName,
+            date = today,
+            deltaMs = sessionMs,
+            lastUpdated = System.currentTimeMillis()
         )
     }
 
@@ -416,14 +421,68 @@ class UsageTrackingForegroundService : LifecycleService() {
     private var lastNotifiedMessageId: String? = null
     private var isEmergencyLocked: Boolean = false
 
+    private var lastUsageSyncTime = 0L
+
+    private suspend fun syncUsageToBackend(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastUsageSyncTime < 60000L) return
+        lastUsageSyncTime = now
+
+        val deviceId = devicePreferences.deviceId ?: return
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val snapshot = usageDao.getDailyUsageSnapshot(today)
+        val totalMs = usageDao.getTotalScreenTimeMs(today) ?: 0L
+        val totalSeconds = (totalMs / 1000).toInt().coerceAtLeast(0)
+
+        val apps = snapshot.map { row ->
+            var appName = row.packageName
+            var category = "other"
+            try {
+                val appInfo = packageManager.getApplicationInfo(row.packageName, 0)
+                appName = packageManager.getApplicationLabel(appInfo).toString()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    category = when (appInfo.category) {
+                        ApplicationInfo.CATEGORY_GAME -> "game"
+                        ApplicationInfo.CATEGORY_AUDIO, ApplicationInfo.CATEGORY_VIDEO, ApplicationInfo.CATEGORY_IMAGE -> "entertainment"
+                        ApplicationInfo.CATEGORY_SOCIAL -> "social"
+                        ApplicationInfo.CATEGORY_PRODUCTIVITY -> "education"
+                        else -> "other"
+                    }
+                }
+            } catch (_: Exception) {}
+            MdmSupabaseClient.DailyAppUsageItem(
+                packageName = row.packageName,
+                appName = appName,
+                appCategory = category,
+                durationSeconds = (row.totalTimeInForegroundMs / 1000).toInt().coerceAtLeast(0)
+            )
+        }
+
+        supabaseClient.syncDeviceDailyUsage(
+            deviceId = deviceId,
+            usageDate = today,
+            totalSeconds = totalSeconds,
+            apps = apps
+        )
+    }
+
+    private fun collectDeviceTelemetry(): MdmSupabaseClient.DeviceTelemetry {
+        return DeviceTelemetryCollector.collect(this, isScreenOn, currentActivePackage)
+    }
+
     private fun startTelemetryReportingLoop() {
         telemetryJob?.cancel()
         telemetryJob = lifecycleScope.launch(Dispatchers.IO) {
+            var loopCount = 0
             while (isActive) {
                 try {
                     checkAndReportTelemetry()
                     checkPendingUnreadMessages()
                     checkRemotePolicyChanges()
+                    loopCount++
+                    if (loopCount % 4 == 0) {
+                        syncUsageToBackend()
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Error in background reporting loop: ${e.message}")
                 }
@@ -468,18 +527,9 @@ class UsageTrackingForegroundService : LifecycleService() {
         if (force || now - lastTelemetryReportTime > minInterval) {
             lastTelemetryReportTime = now
             val deviceId = devicePreferences.deviceId ?: return
-            val (batteryLevel, isCharging) = getBatteryStatus()
-
-            var appLabel = currentActivePackage
-            try {
-                if (currentActivePackage != "Màn hình chính") {
-                    val appInfo = packageManager.getApplicationInfo(currentActivePackage, 0)
-                    appLabel = packageManager.getApplicationLabel(appInfo).toString()
-                }
-            } catch (_: Exception) {}
-
-            supabaseClient.updateTelemetry(deviceId, batteryLevel, isCharging, appLabel)
-            Log.i(TAG, "⚡ Reported telemetry: battery=$batteryLevel%, charging=$isCharging, app=$appLabel")
+            val telemetry = collectDeviceTelemetry()
+            supabaseClient.updateTelemetry(deviceId, telemetry)
+            Log.i(TAG, "⚡ Reported telemetry: battery=${telemetry.batteryLevel}%, brightness=${telemetry.screenBrightness}%, mediaVol=${telemetry.mediaVolume}%, app=${telemetry.currentApp}")
         }
     }
 

@@ -22,7 +22,10 @@ object DatabaseModule {
             context,
             MdmAppDatabase::class.java,
             "mdm_child_db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            .addMigrations(MdmAppDatabase.MIGRATION_1_2)
+            .fallbackToDestructiveMigration()
+            .build()
     }
 
     @Provides

@@ -12,11 +12,13 @@ data class AppUsageEventEntity(
     val timestamp: Long
 )
 
-@Entity(tableName = "daily_app_usage")
+@Entity(
+    tableName = "daily_app_usage",
+    primaryKeys = ["packageName", "date"]
+)
 data class DailyAppUsageEntity(
-    @PrimaryKey
     val packageName: String,
-    val date: String, // YYYY-MM-DD
+    val date: String, // YYYY-MM-DD (local timezone)
     val totalTimeInForegroundMs: Long,
     val lastUpdated: Long
 )
