@@ -31,10 +31,10 @@ import FirebaseCore
     )
     updaterChannel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
       if call.method == "getAppVersion" {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.4"
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.5"
         result(version)
       } else if call.method == "getAppBuildNumber" {
-        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "13"
+        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "14"
         result(buildNumber)
       } else {
         result(FlutterMethodNotImplemented)

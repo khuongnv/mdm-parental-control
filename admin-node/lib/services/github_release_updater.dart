@@ -38,7 +38,7 @@ class ParentAppUpdater {
     this.repoName = 'mdm-parental-control',
   });
 
-  static const String appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.5.4');
+  static const String appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '1.5.5');
 
   /// So sánh Semantic Versioning (SemVer)
   /// Chỉ trả về true nếu phiên bản remote lớn hơn phiên bản hiện tại
